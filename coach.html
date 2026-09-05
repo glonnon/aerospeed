@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com https://api.openai.com http://localhost:* http://127.0.0.1:*; worker-src 'self' blob:; child-src 'self' blob:">
+<title>AI Coach — Dedupe for Strava</title>
+<style>
+  body { font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; color: #242428;
+         background: #f4f4f5; margin: 0; padding: 24px; }
+  .card { max-width: 720px; margin: 0 auto; background: #fff; border: 1px solid #dcdcdc;
+          border-radius: 8px; padding: 20px 24px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #777; margin: 0 0 16px; }
+  #log { background: #fafafa; border: 1px solid #eee; border-radius: 6px; padding: 12px;
+         font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap;
+         max-height: 300px; overflow-y: auto; margin: 14px 0; }
+  .bar { height: 10px; background: #ececec; border-radius: 999px; overflow: hidden; }
+  .fill { height: 100%; background: #fc4c02; width: 0; transition: width .2s; }
+  .btn { background: #fc4c02; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px;
+         font-size: 13px; font-weight: 600; cursor: pointer; }
+  .btn:disabled { opacity: .5; }
+  .muted { color: #888; font-size: 12px; }
+  pre { background: #f7f7f8; border-radius: 6px; padding: 12px; overflow-x: auto; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>AI Coach</h1>
+  <p class="sub">Local WebGPU LLM — creates, monitors, and adjusts training plans with your activity data. Everything runs in your browser.</p>
+  <div class="bar"><div class="fill" id="fill"></div></div>
+  <div id="log">Waking up…</div>
+  <div id="controls" style="display:none">
+    <textarea id="extra" rows="3" style="width:100%;margin:10px 0;padding:8px;border:1px solid #ccc;border-radius:6px"
+      placeholder="Optional: extra context for the AI (races, rest days, preferences)…"></textarea>
+    <button class="btn" id="run">Run</button>
+    <span class="muted">Results are saved back to the extension automatically.</span>
+    <pre id="out"></pre>
+  </div>
+</div>
+<script src="coach_boot.js"></script>
+<script src="../src/content/plans.js"></script>
+<script src="coach.js"></script>
+</body>
+</html>

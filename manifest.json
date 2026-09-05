@@ -1,0 +1,65 @@
+{
+  "manifest_version": 3,
+  "name": "AeroSpeed",
+  "version": "0.24.0",
+  "description": "Find and clean up duplicate Strava activities, track training with a local fitness dashboard, and get AI coaching toward your goals. Everything runs locally in your browser.",
+  "permissions": ["storage"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "AeroSpeed"
+  },
+  "host_permissions": [
+    "https://*.huggingface.co/*",
+    "https://*.hf.co/*",
+    "https://raw.githubusercontent.com/*",
+    "https://api.openai.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com https://api.openai.com http://localhost http://127.0.0.1"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.strava.com/athlete/training*"],
+      "js": [
+        "src/content/ns.js",
+        "src/content/settings.store.js",
+        "src/content/polylines.js",
+        "src/content/units.js",
+        "src/content/viz.js",
+        "src/content/fitness.js",
+        "src/content/plans.js",
+        "src/content/dedupe.js",
+        "src/content/quality.js",
+        "src/content/scanner.js",
+        "src/content/deleter.js",
+        "src/content/settings.js",
+        "src/content/panel.css.js",
+        "src/content/panel.js",
+        "src/content/main.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "aerospeed@opencode.dev",
+      "strict_min_version": "128.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  }
+}
