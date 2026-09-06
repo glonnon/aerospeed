@@ -134,7 +134,7 @@
         { class: 'ds-hdr' },
         DS.h('strong', null, 'AeroSpeed'),
         DS.h('span', { class: 'ds-ver' }, DS.VERSION),
-        DS.h('button', { class: 'ds-iconbtn', type: 'button', title: 'Settings', onclick: () => (els.drawer.open = !els.drawer.open) }, '⚙'),
+        DS.h('button', { class: 'ds-iconbtn', type: 'button', title: 'Settings', onclick: openSettingsDrawer }, '⚙'),
         DS.h('button', { class: 'ds-iconbtn', type: 'button', title: 'Close', onclick: () => toggle(false) }, '✕')
       ),
       DS.h(
@@ -165,6 +165,11 @@
     state.open = open;
     els.panel.hidden = !open;
     els.fab.hidden = open;
+  }
+
+  function openSettingsDrawer() {
+    if (!els.drawer) return;
+    els.drawer.open = !els.drawer.open;
   }
 
   function downloadFile(name, text, mime = 'text/plain') {

@@ -1,7 +1,7 @@
 {
 "name": "aerospeed",
   "private": true,
-  "version": "0.25.1",
+  "version": "0.25.2",
   "type": "module",
   "description": "Deduplicate Strava activities, track training locally, and get AI coaching toward goals (Chrome + Firefox extension)",
   "scripts": {

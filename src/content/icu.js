@@ -47,25 +47,36 @@
   }
 
   // Failsafe when the REST feed comes back empty: read whatever the Activities
-  // table has already rendered on the page.
+  // tab has already rendered on the page (intervals.icu renders rows as
+  // <a class="activity-link" href="/activities/{id}">).
   function scrapeDom() {
     if (typeof document === 'undefined' || !document.querySelector) return [];
     const out = [];
     const seen = new Set();
     const links = document.querySelectorAll('a[href*="/activities/"]');
     for (const link of links) {
-      const m = (link.getAttribute('href') || '').match(DS.site.linkIdRe);
+      const m = (link.getAttribute('href') || '').match(/\/activities\/([a-zA-Z0-9_-]+)/);
       if (!m || seen.has(m[1])) continue;
       seen.add(m[1]);
       const row = link.closest('tr, div, li') || link.parentElement;
-      const txt = (row?.textContent || '').trim();
-      const dMatch = txt.match(/(\d{4}-\d{2}-\d{2})T?[\d:]*/);
+      const txt = String(row?.textContent || link.textContent || '');
+      const typeTxt = txt + ' ' + (row?.className || '') + ' ' + (link.getAttribute('title') || '');
+      const dMatch = txt.match(/(\d{4})-(\d{2})-(\d{2})/);
+      const dMatchLocal = txt.match(/(\d{1,2}) ([A-Z][a-z]{2})/);
+      let startDateLocal = null;
+      if (dMatch) startDateLocal = `${dMatch[1]}-${dMatch[2]}-${dMatch[3]}T12:00:00`;
+      else if (dMatchLocal) {
+        const parsed = Date.parse(`${dMatchLocal[2]} ${dMatchLocal[1]}, ${new Date().getFullYear()}`);
+        if (Number.isFinite(parsed)) startDateLocal = new Date(parsed).toISOString();
+      }
+      const timeEl = row?.querySelector('time[datetime]');
+      if (timeEl) startDateLocal = timeEl.getAttribute('datetime');
       out.push({
         ...blank(),
         id: m[1],
         name: (link.textContent || '').trim() || null,
-        type: guessType((row?.textContent || '') + ' ' + (row?.className || '') + ' ' + (link.getAttribute('title') || '')),
-        startDateLocal: dMatch ? dMatch[0] : null,
+        type: guessType(typeTxt),
+        startDateLocal,
         source: 'icu-dom'
       });
     }
@@ -150,7 +161,6 @@
     const fetchImpl = opts.fetchImpl || defaultFetch;
     const settings = opts.settings || DS.settingsStore?.get() || {};
     const delayMs = opts.delayMs ?? 150;
-    const athleteId = await resolveAthleteId(opts);
 
     let oldestMs;
     if (opts.searchDateStart) oldestMs = Date.parse(opts.searchDateStart);
@@ -168,6 +178,19 @@
     let lastError = null;
 
     let end = newestMs;
+    // Intervals.icu renders the visible list from a WebSocket, so the DOM is the
+    // most reliable source. Use it directly when the page already shows rows.
+    let domSeeded = [];
+    if (typeof document !== 'undefined') {
+      domSeeded = scrapeDom();
+      for (const a of domSeeded) {
+        if (!a?.id || seen.has(a.id)) continue;
+        seen.add(a.id);
+        activities.push(a);
+      }
+    }
+    if (!domSeeded.length) {
+    let athleteId = null;
     while (end > oldestMs && chunks < maxChunks) {
       if (opts.signal?.aborted) {
         stopped = true;
@@ -175,6 +198,7 @@
       }
       const start = Math.max(oldestMs, end - CHUNK_MS);
       const token = triggerToken();
+      if (athleteId == null) athleteId = await resolveAthleteId(opts);
       const path = `/api/athlete/${encodeURIComponent(athleteId)}/activities?oldest=${isoDay(start)}&newest=${isoDay(end)}&limit=200&token=${token}`;
       let rows = [];
       let res = null;
@@ -203,23 +227,16 @@
       end = start - 86400000;
       if (delayMs && end > oldestMs) await sleep(delayMs);
     }
-
-    let domUsed = false;
-    if (!activities.length && !lastError && typeof document !== 'undefined') {
-      const domRows = scrapeDom();
-      for (const a of domRows) {
-        if (!a?.id || seen.has(a.id)) continue;
-        seen.add(a.id);
-        activities.push(a);
-      }
-      domUsed = domRows.length > 0;
     }
+
+    const domOnly = domSeeded.length > 0 && chunks === 0;
+    const chunkDone = end > oldestMs;
 
     return {
       activities,
-      pages: chunks || domUsed ? 1 : 0,
-      strategy: domUsed ? 'icu-dom' : 'icu-api',
-      truncated: end > oldestMs && !stopped && !domUsed,
+      pages: chunks || domOnly ? 1 : 0,
+      strategy: domOnly ? 'icu-dom' : 'icu-api',
+      truncated: chunkDone && !stopped && !domOnly,
       stopped,
       hasWebToken: false
     };

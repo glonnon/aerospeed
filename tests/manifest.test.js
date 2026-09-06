@@ -31,6 +31,27 @@ describe('manifest', () => {
     expect(ns).toContain(`DS.VERSION = '${manifest.version}'`);
   });
 
+  it('matches all intervals.icu routes the extension supports', () => {
+    const patterns = manifest.content_scripts.flatMap((cs) => cs.matches);
+    const globToRe = (pattern) => {
+      const parts = [];
+      let i = 0;
+      for (const ch of pattern) {
+        if (ch === '*') parts.push('[\\s\\S]*');
+        else parts.push(ch.replace(/[\\^$+.(){}[\]|]/g, '\\$&'));
+      }
+      return new RegExp('^' + parts.join('') + '$');
+    };
+    for (const u of [
+      'https://intervals.icu/athletes',
+      'https://intervals.icu/athletes?page=1',
+      'https://intervals.icu/athlete/i12345/activities',
+      'https://intervals.icu/activities'
+    ]) {
+      expect(patterns.some((p) => globToRe(p).test(u)), `no match for ${u}`).toBe(true);
+    }
+  });
+
   it('has Firefox gecko settings', () => {
     expect(manifest.browser_specific_settings.gecko.id).toBeTruthy();
     expect(manifest.browser_specific_settings.gecko.data_collection_permissions.required).toContain('none');

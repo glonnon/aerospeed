@@ -130,6 +130,21 @@ describe('panel', () => {
     expect(host.shadowRoot.querySelector('.ds-panel').hidden).toBe(true);
   });
 
+  it('toggles the settings drawer via the header gear and the AI card button', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    DS.panel.mount(host);
+    const gear = host.shadowRoot.querySelector('.ds-iconbtn[title="Settings"]');
+    expect(gear).toBeTruthy();
+    const drawer = [...host.shadowRoot.querySelectorAll('.ds-drawer')].find((d) =>
+      d.querySelector('.ds-drawer-head').textContent.includes('Settings')
+    );
+    gear.click();
+    expect(drawer.open).toBe(true);
+    gear.click();
+    expect(drawer.open).toBe(false);
+  });
+
   it('finds the training tab strip at the li level', () => {
     document.body.innerHTML = `
       <main>
