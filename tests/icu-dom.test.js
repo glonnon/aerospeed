@@ -69,6 +69,37 @@ describe('icu.scrapeDom via scanAll (jsdom)', () => {
     expect(out.activities[0].id).toBe('i900');
   });
 
+  it('parses distance and duration from rendered row text', async () => {
+    document.body.innerHTML = `
+      <div class="activity">
+        <a class="activity-link clickable" href="/activities/i1001">Morning Loop</a>
+        <span class="date">2026-09-05</span>
+        <span class="dist">56.4&nbsp;km</span>
+        <span class="time">2:14:30</span>
+      </div>
+      <div class="activity">
+        <a class="activity-link clickable" href="/activities/i1002">Morning Loop</a>
+        <span class="date">2026-09-05</span>
+        <span class="dist">56.4 km</span>
+        <span class="time">2:14:30</span>
+      </div>`;
+    const out = await DS.icu.scanAll({
+      fetchImpl: async (url) => ({ ok: false, status: 403 }),
+      pathname: '/athletes',
+      searchDateStart: '2026-09-01',
+      searchDateEnd: '2026-09-06',
+      delayMs: 0,
+      retryDelayMs: 0,
+      maxAttempts: 1
+    });
+    expect(out.activities).toHaveLength(2);
+    for (const a of out.activities) {
+      expect(a.distanceM).toBeCloseTo(56400, 0);
+      expect(a.movingTimeS).toBe(8070);
+      expect(a.startDateLocal).toContain('2026-09-05');
+    }
+  });
+
   it('retries until the WebSocket paints rows, then seeds from the DOM', async () => {
     document.body.innerHTML = `<div class="empty">loading…</div>`;
     const fetchImpl = async (url) => ({ ok: false, status: 403, json: async () => ({}) });

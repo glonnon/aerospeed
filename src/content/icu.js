@@ -40,15 +40,17 @@
 
   function guessType(text) {
     const t = String(text || '').toLowerCase();
-    if (/(ride|bike|cycling|virtual ride|trainer)/.test(t)) return 'Ride';
-    if (/(run|walk|hike|treadmill)/.test(t)) return 'Run';
-    if (/(swim|swimming)/.test(t)) return 'Swim';
+    if (/(ride|bike|biking|cycling|velo|virtual ride|trainer|indoor cycling|mtb)/.test(t)) return 'Ride';
+    if (/(run|jog|trail run|walk|hike|treadmill)/.test(t)) return 'Run';
+    if (/(swim|swimming|pool|open water)/.test(t)) return 'Swim';
     return null;
   }
 
   // Failsafe when the REST feed comes back empty: read whatever the Activities
-  // tab has already rendered on the page (intervals.icu renders rows as
-  // <a class="activity-link" href="/activities/{id}">).
+  // tab has already rendered on the page. intervals.icu renders each activity as
+  // <a class="activity-link" href="/activities/{id}"> inside a row, with columns
+  // for date, type, distance and time. Parsing the row text is the reliable way
+  // to recover metrics for the visible duplicates.
   function scrapeDom() {
     if (typeof document === 'undefined' || !document.querySelector) return [];
     const out = [];
@@ -58,25 +60,49 @@
       const m = (link.getAttribute('href') || '').match(/\/activities\/([a-zA-Z0-9_-]+)/);
       if (!m || seen.has(m[1])) continue;
       seen.add(m[1]);
-      const row = link.closest('tr, div, li') || link.parentElement;
-      const txt = String(row?.textContent || link.textContent || '');
-      const typeTxt = txt + ' ' + (row?.className || '') + ' ' + (link.getAttribute('title') || '');
-      const dMatch = txt.match(/(\d{4})-(\d{2})-(\d{2})/);
-      const dMatchLocal = txt.match(/(\d{1,2}) ([A-Z][a-z]{2})/);
-      let startDateLocal = null;
-      if (dMatch) startDateLocal = `${dMatch[1]}-${dMatch[2]}-${dMatch[3]}T12:00:00`;
-      else if (dMatchLocal) {
-        const parsed = Date.parse(`${dMatchLocal[2]} ${dMatchLocal[1]}, ${new Date().getFullYear()}`);
-        if (Number.isFinite(parsed)) startDateLocal = new Date(parsed).toISOString();
+      const linkText = (link.textContent || '');
+      const row = link.closest('.activity, tr, li, div') || link.parentElement;
+      const txt = String(row?.textContent || linkText);
+      const hintBits = [row?.className, link.getAttribute('title')];
+      if (row) {
+        for (const el of row.querySelectorAll('[title], svg title')) {
+          const h = el.getAttribute?.('title') || el.textContent || '';
+          if (h && h.length < 80) hintBits.push(h);
+        }
       }
+      const typeTxt = txt + ' ' + hintBits.join(' ');
+      const dMatch = txt.match(/(\d{4})-(\d{2})-(\d{2})/);
       const timeEl = row?.querySelector('time[datetime]');
-      if (timeEl) startDateLocal = timeEl.getAttribute('datetime');
+      let startDateLocal = timeEl ? timeEl.getAttribute('datetime') : null;
+      if (!startDateLocal && dMatch) startDateLocal = `${dMatch[1]}-${dMatch[2]}-${dMatch[3]}T12:00:00`;
+
+      const distMatch = txt.match(/([\d][\d.,]*)\s*(km|mi)\b/i);
+      let distanceM = null;
+      if (distMatch) {
+        const n = Number(String(distMatch[1]).replace(/,/g, ''));
+        if (Number.isFinite(n)) distanceM = /mi|mile/i.test(distMatch[2]) ? n * 1609.344 : n * 1000;
+      }
+
+      // Duration h:mm:ss — prefer the colon-time with two separators (hours
+      // present), which in the list is the moving time, not the start time.
+      let movingTimeS = null;
+      const hmmss = txt.match(/(?:^|\s)(\d{1,3}):(\d{2}):(\d{2})(?:\s|$)/);
+      const hmm = txt.match(/(?:^|\s)(\d{1,3}):(\d{2})(?:\s|$)/);
+      const part = hmmss ? [hmmss[1], hmmss[2], hmmss[3]] : hmm ? [hmm[1], hmm[2], 0] : null;
+      if (part) {
+        const hrs = Number(part[0]);
+        const mins = Number(part[1]);
+        if (hrs < 24 && mins < 60 && (hrs > 0 || hmmss)) movingTimeS = hrs * 3600 + mins * 60 + Number(part[2] || 0);
+      }
+
       out.push({
         ...blank(),
         id: m[1],
-        name: (link.textContent || '').trim() || null,
+        name: (linkText || '').trim() && linkText.trim() !== m[1] ? linkText.trim() : null,
         type: guessType(typeTxt),
         startDateLocal,
+        distanceM,
+        movingTimeS,
         source: 'icu-dom'
       });
     }
@@ -173,26 +199,33 @@
   const INCREMENTAL_MS = 92 * 86400000;
 
   // One pass: merge whatever the page has already rendered (DOM, from the WS)
-  // with fresh REST chunks. Never throws if the DOM produced rows.
-  async function attemptScan(opts, fetchImpl, settings, delayMs, seen, oldestMs, newestMs) {
-    const activities = [];
+  // with fresh REST chunks. Returns the FULL set seen this pass (including
+  // already-known ids) so callers can upgrade cached sparse rows to fuller ones.
+  async function attemptScan(opts, fetchImpl, settings, delayMs, known, oldestMs, newestMs) {
     let chunks = 0;
     let stopped = false;
     let error = null;
-    let byId = new Map();
+    const byId = new Map();
 
-    const domSeeded = (typeof document !== 'undefined' ? scrapeDom() : []).filter((a) => a && a.id && !seen.has(a.id));
-    for (const a of domSeeded) {
-      seen.add(a.id);
-      byId.set(a.id, a);
+    // 1) Seed from whatever the page already renders (visible duplicates).
+    if (typeof document !== 'undefined') {
+      for (const a of scrapeDom()) {
+        if (!a || !a.id) continue;
+        const prev = byId.get(a.id);
+        if (!prev || (prev.distanceM == null && a.distanceM != null)) byId.set(a.id, a);
+      }
     }
+    const domCount = byId.size;
 
     if (opts.signal?.aborted) stopped = true;
 
+    // 2) Try the REST feed for the full window (may be empty — it also just
+    //    triggers the WebSocket push the page consumes).
     if (!opts.signal?.aborted) {
       let athleteId = null;
       let end = newestMs;
       const maxChunks = Math.max(1, opts.maxPages || 40);
+      let newCount = 0;
       while (end > oldestMs && chunks < maxChunks) {
         if (opts.signal?.aborted) {
           stopped = true;
@@ -214,16 +247,19 @@
           break;
         }
         chunks += 1;
-        let added = 0;
         for (const a of rows) {
           if (!a) continue;
-          if (seen.has(a.id)) continue;
-          seen.add(a.id);
-          byId.set(a.id, a);
-          added += 1;
+          const prev = byId.get(a.id);
+          if (prev) {
+            // Prefer the richer copy (REST rows carry metrics the DOM may lack).
+            if (prev.distanceM == null && a.distanceM != null) byId.set(a.id, a);
+          } else {
+            byId.set(a.id, a);
+            if (!known.has(a.id)) newCount += 1;
+          }
         }
         opts.onProgress?.({ page: chunks, loaded: byId.size, strategy: 'icu-api' });
-        if (opts.knownIds && added === 0) break;
+        if (opts.knownIds && newCount === 0) break;
         if (opts.stopAfter && byId.size >= opts.stopAfter) break;
         if (start <= oldestMs) break;
         end = start - 86400000;
@@ -231,9 +267,8 @@
       }
     }
 
-    for (const a of byId.values()) activities.push(a);
-
-    return { activities, chunks, stopped, error, domSeeded: domSeeded.length > 0 };
+    const activities = [...byId.values()];
+    return { activities, chunks, stopped, error, domSeeded: domCount > 0 };
   }
 
   async function scanAll(opts = {}) {
@@ -260,6 +295,12 @@
       best = r;
       if (r.activities.length || r.stopped || attempt === maxAttempts) break;
       if (attempt < maxAttempts && !opts.signal?.aborted) await sleep(retryDelayMs); // let the WS paint rows
+    }
+
+    if (best.activities.length) {
+      console.info(
+        `[dedupe] icu scan: ${best.activities.length} activities (${best.domSeeded ? 'dom' : ''}${best.chunks ? '+rest' : ''}${best.error ? `, rest error: ${best.error.message}` : ''})`
+      );
     }
 
     if (!best.activities.length && best.error) {
