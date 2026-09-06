@@ -749,6 +749,12 @@
   }
 
   function openDashboard() {
+    // Off Strava (e.g. intervals.icu) the page-embedded dashboard doesn't
+    // belong — surface the duplicate review as a focused panel dialog instead.
+    if (DS.site.id !== 'strava') {
+      openResultsDialog();
+      return;
+    }
     if (state.dash && !state.dash.isConnected) state.dash = null;
     if (state.dash) {
       state.dash.style.display = 'block';
@@ -772,6 +778,12 @@
     }
     renderDashboard();
     state.dash.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function openResultsDialog() {
+    toggle(true);
+    if (state.groups && state.groups.length && !els.results.querySelector('.ds-group')) renderGroups();
+    els.results.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   function closeDashboard() {
@@ -2132,6 +2144,9 @@
     else els.results.textContent = '';
     applyBadges();
     if (state.dash) renderDashboard();
+    // On intervals.icu the page-embedded dashboard is off; direct the user to
+    // the review dialog when duplicates are present.
+    if (DS.site.id !== 'strava' && state.groups.length) openResultsDialog();
   }
 
   function autoScan() {

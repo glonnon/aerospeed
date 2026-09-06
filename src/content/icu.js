@@ -40,10 +40,29 @@
 
   function guessType(text) {
     const t = String(text || '').toLowerCase();
-    if (/(ride|bike|biking|cycling|velo|virtual ride|trainer|indoor cycling|mtb)/.test(t)) return 'Ride';
-    if (/(run|jog|trail run|walk|hike|treadmill)/.test(t)) return 'Run';
-    if (/(swim|swimming|pool|open water)/.test(t)) return 'Swim';
+    if (/(run|jog|trail run|virtual run|treadmill|track run|ultra)/.test(t)) return 'Run';
+    if (/(ride|bike|biking|cycling|velo|road bike|mtb|mountain bike|gravel|ebike|e-bike|virtual ride|indoor cycling|trainer ride|cyclocross|enduro|bikepack|bike ride)/.test(t)) return 'Ride';
+    if (/(swim|swimming|pool swim|open water|swimrun|lap swim)/.test(t)) return 'Swim';
+    if (/(hike|walk|walking|nordic|trail hike)/.test(t)) return 'Walk';
     return null;
+  }
+
+  // Walk up from the activity link until we land on the element that actually
+  // carries the row's metrics. intervals.icu nests the name in a cell, so the
+  // nearest div/li is just the name cell — we keep climbing until the text
+  // contains a distance, or we hit a table row or the row container.
+  function rowAround(link) {
+    let el = link;
+    for (let i = 0; el && i < 8; i++) {
+      el = el.parentElement;
+      if (!el || el === document.body) break;
+      const tag = el.tagName;
+      const t = String(el.textContent || '');
+      if (tag === 'TR' || /\d[\d.,]*\s*(km|mi)\b/i.test(t) || /(^|[\s·])\d{1,3}:\d{2}:\d{2}/.test(t)) {
+        return el;
+      }
+    }
+    return link.parentElement || link;
   }
 
   // Failsafe when the REST feed comes back empty: read whatever the Activities
@@ -61,7 +80,7 @@
       if (!m || seen.has(m[1])) continue;
       seen.add(m[1]);
       const linkText = (link.textContent || '');
-      const row = link.closest('.activity, tr, li, div') || link.parentElement;
+      const row = rowAround(link);
       const txt = String(row?.textContent || linkText);
       const hintBits = [row?.className, link.getAttribute('title')];
       if (row) {
@@ -99,7 +118,7 @@
         ...blank(),
         id: m[1],
         name: (linkText || '').trim() && linkText.trim() !== m[1] ? linkText.trim() : null,
-        type: guessType(typeTxt),
+        type: guessType(typeTxt) || 'Other',
         startDateLocal,
         distanceM,
         movingTimeS,
@@ -301,6 +320,7 @@
       console.info(
         `[dedupe] icu scan: ${best.activities.length} activities (${best.domSeeded ? 'dom' : ''}${best.chunks ? '+rest' : ''}${best.error ? `, rest error: ${best.error.message}` : ''})`
       );
+      console.info('[dedupe] icu sample:', best.activities.slice(0, 4).map((a) => ({ id: a.id, type: a.type, d: Math.round(a.distanceM || 0), t: a.movingTimeS, s: a.startDateLocal })));
     }
 
     if (!best.activities.length && best.error) {

@@ -100,6 +100,38 @@ describe('icu.scrapeDom via scanAll (jsdom)', () => {
     }
   });
 
+  it('climbs past the name cell to read the sibling metric columns', async () => {
+    document.body.innerHTML = `
+      <div class="activity">
+        <div class="name-cell"><a class="activity-link clickable" href="/activities/i201">Commute Loop</a></div>
+        <span class="date">2026-09-02</span>
+        <span class="sport">Ride</span>
+        <span>41.2 km</span>
+        <span>1:52:10</span>
+      </div>
+      <div class="activity">
+        <div class="name-cell"><a class="activity-link clickable" href="/activities/i202">Commute Loop</a></div>
+        <span class="date">2026-09-02</span>
+        <span class="sport">Ride</span>
+        <span>41.2 km</span>
+        <span>1:52:10</span>
+      </div>`;
+    const out = await DS.icu.scanAll({
+      fetchImpl: async () => ({ ok: false, status: 403 }),
+      pathname: '/athletes',
+      searchDateStart: '2026-09-01',
+      searchDateEnd: '2026-09-06',
+      delayMs: 0,
+      retryDelayMs: 0,
+      maxAttempts: 1
+    });
+    expect(out.activities).toHaveLength(2);
+    const a = out.activities.find((x) => x.id === 'i201');
+    expect(a.distanceM).toBeCloseTo(41200, 0);
+    expect(a.movingTimeS).toBe(1 * 3600 + 52 * 60 + 10);
+    expect(a.type).toBe('Ride');
+  });
+
   it('retries until the WebSocket paints rows, then seeds from the DOM', async () => {
     document.body.innerHTML = `<div class="empty">loading…</div>`;
     const fetchImpl = async (url) => ({ ok: false, status: 403, json: async () => ({}) });

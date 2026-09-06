@@ -174,6 +174,20 @@ describe('panel', () => {
     expect(st.activities.map((a) => a.id)).toEqual(['i1', 'i2']);
   });
 
+  it('groups full intervals.icu rows into duplicates', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    DS.panel.mount(host);
+    const st = DS.panel.state;
+    st.activities = [
+      { id: 'i1', type: 'Ride', startDateLocal: '2026-09-05T07:30:00', distanceM: 40000, movingTimeS: 5400, source: 'icu-dom' },
+      { id: 'i2', type: 'Ride', startDateLocal: '2026-09-05T07:32:00', distanceM: 40100, movingTimeS: 5412, source: 'icu-dom' }
+    ];
+    st.groups = DS.dedupe.findGroups(st.activities, DS.settingsStore.get());
+    expect(st.groups).toHaveLength(1);
+    expect(st.groups[0].remove.map((a) => a.id)).toEqual(['i1']);
+  });
+
   it('finds the training tab strip at the li level', () => {
     document.body.innerHTML = `
       <main>
