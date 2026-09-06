@@ -65,7 +65,46 @@ describe('icu.normalize', () => {
   });
 });
 
+describe('icu.extractRows', () => {
+  it('accepts a bare array or a wrapper object', () => {
+    const a = icuAct({ id: 'i1' });
+    expect(DS.icu.extractRows([a])).toHaveLength(1);
+    expect(DS.icu.extractRows({ list: [a] })[0].id).toBe('i1');
+    expect(DS.icu.extractRows({ activities: [a] })[0].id).toBe('i1');
+    expect(DS.icu.extractRows({ rows: [a] })[0].id).toBe('i1');
+    expect(DS.icu.extractRows({ foo: 'bar' })).toEqual([]);
+    expect(DS.icu.extractRows(null)).toEqual([]);
+  });
+
+  it('guesses a sport type from text', () => {
+    expect(DS.icu.guessType('Evening Ride')).toBe('Ride');
+    expect(DS.icu.guessType('Morning Run')).toBe('Run');
+    expect(DS.icu.guessType('Pool Swim')).toBe('Swim');
+    expect(DS.icu.guessType('Weights')).toBe(null);
+  });
+});
+
 describe('icu.scanAll', () => {
+  it('accepts the {list} wrapper the Activities tab returns', async () => {
+    const fetchImpl = async () => res({ list: [icuAct({ id: 'i1' }), icuAct({ id: 'i2' })] });
+    const out = await DS.icu.scanAll({
+      fetchImpl,
+      pathname: '/athlete/i12345/activities',
+      searchDateStart: '2026-08-01',
+      searchDateEnd: '2026-09-05',
+      delayMs: 0
+    });
+    expect(out.strategy).toBe('icu-api');
+    expect(out.activities).toHaveLength(2);
+  });
+
+  it('throws a clear error when the feed is unavailable', async () => {
+    const fetchImpl = async () => res({}, false, 403);
+    await expect(
+      DS.icu.scanAll({ fetchImpl, pathname: '/athlete/i1/activities', searchDateStart: '2026-08-01', delayMs: 0 })
+    ).rejects.toThrow(/403/);
+  });
+
   it('fetches 92-day chunks newest-first and normalizes rows', async () => {
     const calls = [];
     const fetchImpl = async (url) => {

@@ -165,6 +165,8 @@
       pointer-events: none; white-space: nowrap;
     }
     .ds-fit-tip-date { font-weight: 600; margin-bottom: 2px; }
+    .ds-share-card { margin-top: 10px; border-top: 1px solid #f2f2f2; padding-top: 10px; }
+    .ds-share-card canvas { width: 100%; height: auto; display: block; border-radius: 10px; margin-top: 8px; }
     .ds-plan { grid-column: 1 / -1; }
     .ds-ai-card {
       border: 1px solid #fc4c02; border-radius: 8px; padding: 8px 10px; margin: 6px 0 10px;

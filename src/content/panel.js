@@ -179,60 +179,65 @@
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 
+  function buildShareCard() {
+    const stats = DS.viz.shareStats(state.activities, { filter: state.dashFilter || 'all' });
+    const W = 900;
+    const H = 420;
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    const ctx = c.getContext('2d');
+    if (!ctx) throw new Error('no canvas');
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#101418');
+    grad.addColorStop(1, '#24292f');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#fff';
+    ctx.font = '800 44px -apple-system, Segoe UI, Roboto, sans-serif';
+    ctx.fillText(`AeroSpeed ${new Date().getFullYear()}`, 48, 78);
+    ctx.font = '400 20px -apple-system, Segoe UI, Roboto, sans-serif';
+    ctx.fillStyle = '#ff8a65';
+    ctx.fillText('Year in review', 48, 112);
+    const cells = [
+      ['Activities', stats.count],
+      ['Distance', `${fmtDist(stats.distKm * 1000, 0)}`],
+      ['Time', `${stats.timeH} h`],
+      ['Climbing', fmtElev(stats.elevM)],
+      ['Best streak', `${stats.bestStreak} days`]
+    ];
+    const cx = W - 48 - 440;
+    const colW = 176;
+    const rowH = 52;
+    [
+      [0, 0],
+      [0, 1],
+      [1, 0],
+      [1, 1],
+      [0, 2]
+    ].forEach(([cc, rr], i) => {
+      const x = cx + cc * (colW + 22);
+      const y = 170 + rr * (rowH + 18);
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.beginPath();
+      ctx.roundRect(x, y, colW, rowH, 10);
+      ctx.fill();
+      ctx.fillStyle = '#ff8a65';
+      ctx.font = '12px -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.fillText(String(cells[i][0]).toUpperCase(), x + 14, y + 18);
+      ctx.fillStyle = '#fff';
+      ctx.font = '700 26px -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.fillText(String(cells[i][1]), x + 14, y + 43);
+    });
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '15px -apple-system, Segoe UI, Roboto, sans-serif';
+    ctx.fillText(`All-time: ${stats.totalCount} activities · ${fmtDist(stats.totalDistKm * 1000, 0)}`, 48, H - 36);
+    return c;
+  }
+
   function downloadShareCard() {
     try {
-      const stats = DS.viz.shareStats(state.activities, { filter: state.dashFilter || 'all' });
-      const W = 900;
-      const H = 420;
-      const c = document.createElement('canvas');
-      c.width = W;
-      c.height = H;
-      const ctx = c.getContext('2d');
-      if (!ctx) throw new Error('no canvas');
-      const grad = ctx.createLinearGradient(0, 0, 0, H);
-      grad.addColorStop(0, '#101418');
-      grad.addColorStop(1, '#24292f');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = '#fff';
-      ctx.font = '800 44px -apple-system, Segoe UI, Roboto, sans-serif';
-      ctx.fillText(`AeroSpeed ${new Date().getFullYear()}`, 48, 78);
-      ctx.font = '400 20px -apple-system, Segoe UI, Roboto, sans-serif';
-      ctx.fillStyle = '#ff8a65';
-      ctx.fillText('Year in review', 48, 112);
-      const cells = [
-        ['Activities', stats.count],
-        ['Distance', `${fmtDist(stats.distKm * 1000, 0)}`],
-        ['Time', `${stats.timeH} h`],
-        ['Climbing', fmtElev(stats.elevM)],
-        ['Best streak', `${stats.bestStreak} days`]
-      ];
-      const cx = W - 48 - 440;
-      const colW = 176;
-      const rowH = 52;
-      [
-        [0, 0],
-        [0, 1],
-        [1, 0],
-        [1, 1],
-        [0, 2]
-      ].forEach(([cc, rr], i) => {
-        const x = cx + cc * (colW + 22);
-        const y = 170 + rr * (rowH + 18);
-        ctx.fillStyle = 'rgba(255,255,255,0.08)';
-        ctx.beginPath();
-        ctx.roundRect(x, y, colW, rowH, 10);
-        ctx.fill();
-        ctx.fillStyle = '#ff8a65';
-        ctx.font = '12px -apple-system, Segoe UI, Roboto, sans-serif';
-        ctx.fillText(String(cells[i][0]).toUpperCase(), x + 14, y + 18);
-        ctx.fillStyle = '#fff';
-        ctx.font = '700 26px -apple-system, Segoe UI, Roboto, sans-serif';
-        ctx.fillText(String(cells[i][1]), x + 14, y + 43);
-      });
-      ctx.fillStyle = 'rgba(255,255,255,0.5)';
-      ctx.font = '15px -apple-system, Segoe UI, Roboto, sans-serif';
-      ctx.fillText(`All-time: ${stats.totalCount} activities · ${fmtDist(stats.totalDistKm * 1000, 0)}`, 48, H - 36);
+      const c = buildShareCard();
       c.toBlob((blob) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -406,7 +411,10 @@
         htmlDiagnostics: res.htmlDiagnostics
       });
       if (!res.activities.length) {
-        els.status.textContent = `Scan finished: 0 activities loaded. Are you logged in to Strava on this tab?`;
+        els.status.textContent =
+          DS.site.id === 'intervals'
+            ? 'Scan finished: 0 activities. Intervals.icu feeds its list over a live WebSocket — if this persists, reload the page or open the athlete Activities tab.'
+            : 'Scan finished: 0 activities loaded. Are you logged in to Strava on this tab?';
         if (res.htmlDiagnostics) showDiagnostics(res.htmlDiagnostics, res.hasWebToken);
         console.info('[dedupe] scan finished with 0 activities', res);
         return;
@@ -1708,12 +1716,14 @@
         ...rows,
         DS.h(
           'div',
-          { class: 'ds-group-actions' },
-          DS.h('button', {
-            class: 'ds-btn ds-btn-ghost ds-btn-xs',
-            type: 'button',
-            onclick: () => downloadShareCard()
-          }, '⬇ Share card (PNG)')
+          { class: 'ds-share-card' },
+          DS.h(
+            'div',
+            { class: 'ds-group-actions' },
+            DS.h('strong', null, 'Share card'),
+            DS.h('button', { class: 'ds-btn ds-btn-xs', type: 'button', onclick: () => downloadShareCard() }, '⬇ Download PNG')
+          ),
+          buildShareCard()
         )
       );
     });
@@ -2167,7 +2177,10 @@
           afterDataChanged();
         }
       })
-      .catch((e) => console.error('[dedupe] auto-scan failed', e))
+      .catch((e) => {
+        console.error('[dedupe] auto-scan failed', e);
+        els.status.textContent = `Auto-scan failed: ${e.message}`;
+      })
       .finally(() => {
         state.scanning = false;
       });

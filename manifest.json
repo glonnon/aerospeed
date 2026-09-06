@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AeroSpeed",
-  "version": "0.25.0",
+  "version": "0.25.1",
   "description": "Find and clean up duplicate Strava activities, track training with a local fitness dashboard, and get AI coaching toward your goals. Everything runs locally in your browser.",
   "permissions": ["storage"],
   "background": {
@@ -32,7 +32,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.strava.com/athlete/training*", "https://intervals.icu/athlete/*/activities*"],
+      "matches": ["https://www.strava.com/athlete/training*", "https://intervals.icu/athlete/*/activities*", "https://intervals.icu/activities*"],
       "js": [
         "src/content/ns.js",
         "src/content/site.js",

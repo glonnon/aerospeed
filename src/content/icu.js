@@ -17,17 +17,96 @@
     return m ? decodeURIComponent(m[1]) : null;
   }
 
-  async function apiGet(fetchImpl, path) {
-    const res = await fetchImpl(path, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-    if (!res.ok) throw new Error(`HTTP ${res.status} from ${path}`);
-    return res.json();
+  // The Activities tab loads its list over a WebSocket; the REST /api/athlete/{id}/
+  // activities call is what *triggers* that push and its body is ignored by the app.
+  // It can return a bare array or a wrapper ({list}, {activities}, {rows}, ...).
+  function extractRows(data) {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data.data)) return data.data;
+    for (const k of ['list', 'activities', 'rows', 'items']) {
+      if (Array.isArray(data[k])) return data[k];
+    }
+    return [];
+  }
+
+  function triggerToken() {
+    return 'm' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  }
+
+  function apiGet(fetchImpl, path) {
+    return fetchImpl(path, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+  }
+
+  function guessType(text) {
+    const t = String(text || '').toLowerCase();
+    if (/(ride|bike|cycling|virtual ride|trainer)/.test(t)) return 'Ride';
+    if (/(run|walk|hike|treadmill)/.test(t)) return 'Run';
+    if (/(swim|swimming)/.test(t)) return 'Swim';
+    return null;
+  }
+
+  // Failsafe when the REST feed comes back empty: read whatever the Activities
+  // table has already rendered on the page.
+  function scrapeDom() {
+    if (typeof document === 'undefined' || !document.querySelector) return [];
+    const out = [];
+    const seen = new Set();
+    const links = document.querySelectorAll('a[href*="/activities/"]');
+    for (const link of links) {
+      const m = (link.getAttribute('href') || '').match(DS.site.linkIdRe);
+      if (!m || seen.has(m[1])) continue;
+      seen.add(m[1]);
+      const row = link.closest('tr, div, li') || link.parentElement;
+      const txt = (row?.textContent || '').trim();
+      const dMatch = txt.match(/(\d{4}-\d{2}-\d{2})T?[\d:]*/);
+      out.push({
+        ...blank(),
+        id: m[1],
+        name: (link.textContent || '').trim() || null,
+        type: guessType((row?.textContent || '') + ' ' + (row?.className || '') + ' ' + (link.getAttribute('title') || '')),
+        startDateLocal: dMatch ? dMatch[0] : null,
+        source: 'icu-dom'
+      });
+    }
+    return out;
+  }
+
+  function blank() {
+    return {
+      name: null,
+      type: null,
+      startDateLocal: null,
+      distanceM: null,
+      movingTimeS: null,
+      elapsedTimeS: null,
+      elevationM: null,
+      deviceName: null,
+      commute: null,
+      gearId: null,
+      trainer: null,
+      isPrivate: null,
+      hasHr: false,
+      hasPower: false,
+      hasCadence: false,
+      hasGps: false,
+      manual: false,
+      kudosCount: 0,
+      commentCount: 0,
+      photoCount: 0,
+      prCount: 0,
+      achievementCount: 0,
+      polyline: null,
+      source: 'icu'
+    };
   }
 
   async function resolveAthleteId(opts = {}) {
     const fromUrl = athleteIdFromUrl(opts.pathname ?? (typeof location !== 'undefined' ? location.pathname : ''));
     if (fromUrl) return fromUrl;
     const me = await apiGet(opts.fetchImpl || defaultFetch, '/api/athlete');
-    if (me && me.id != null) return String(me.id);
+    const meData = me.ok ? await me.json().catch(() => null) : null;
+    if (meData && meData.id != null) return String(meData.id);
     throw new Error('Could not determine the intervals.icu athlete id — open the Activities tab of an athlete page.');
   }
 
@@ -86,6 +165,7 @@
     const activities = [];
     let chunks = 0;
     let stopped = false;
+    let lastError = null;
 
     let end = newestMs;
     while (end > oldestMs && chunks < maxChunks) {
@@ -94,12 +174,23 @@
         break;
       }
       const start = Math.max(oldestMs, end - CHUNK_MS);
-      const path = `/api/athlete/${encodeURIComponent(athleteId)}/activities?oldest=${isoDay(start)}&newest=${isoDay(end)}`;
-      const data = await apiGet(fetchImpl, path);
+      const token = triggerToken();
+      const path = `/api/athlete/${encodeURIComponent(athleteId)}/activities?oldest=${isoDay(start)}&newest=${isoDay(end)}&limit=200&token=${token}`;
+      let rows = [];
+      let res = null;
+      try {
+        res = await apiGet(fetchImpl, path);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json().catch(() => null);
+        rows = extractRows(data).map(normalize).filter(Boolean);
+      } catch (e) {
+        lastError = e;
+        if (res && res.status >= 500) break;
+        throw new Error(`Intervals.icu fetch failed (${res?.status ?? 'network'}): ${e.message}`);
+      }
       chunks += 1;
       let added = 0;
-      for (const raw of Array.isArray(data) ? data : []) {
-        const a = normalize(raw);
+      for (const a of rows) {
         if (!a || seen.has(a.id)) continue;
         seen.add(a.id);
         activities.push(a);
@@ -113,11 +204,22 @@
       if (delayMs && end > oldestMs) await sleep(delayMs);
     }
 
+    let domUsed = false;
+    if (!activities.length && !lastError && typeof document !== 'undefined') {
+      const domRows = scrapeDom();
+      for (const a of domRows) {
+        if (!a?.id || seen.has(a.id)) continue;
+        seen.add(a.id);
+        activities.push(a);
+      }
+      domUsed = domRows.length > 0;
+    }
+
     return {
       activities,
-      pages: chunks,
-      strategy: 'icu-api',
-      truncated: end > oldestMs && !stopped,
+      pages: chunks || domUsed ? 1 : 0,
+      strategy: domUsed ? 'icu-dom' : 'icu-api',
+      truncated: end > oldestMs && !stopped && !domUsed,
       stopped,
       hasWebToken: false
     };
@@ -161,7 +263,9 @@
 
   async function fetchActivityMeta(id, fetchImpl = defaultFetch) {
     try {
-      return normalize(await apiGet(fetchImpl, `/api/activity/${encodeURIComponent(id)}`));
+      const res = await apiGet(fetchImpl, `/api/activity/${encodeURIComponent(id)}`);
+      if (!res.ok) return null;
+      return normalize(await res.json().catch(() => null));
     } catch (e) {
       DS.debug?.('icu meta fetch failed', e);
       return null;
@@ -176,6 +280,9 @@
     deleteActivity,
     deleteMany,
     fetchActivityMeta,
-    xsrfToken
+    xsrfToken,
+    extractRows,
+    guessType,
+    triggerToken
   };
 })();
