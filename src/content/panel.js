@@ -14,7 +14,8 @@
     badgeObserver: null,
     rangeAbort: null,
     volWeeks: 0,
-    dashDayKey: null
+    dashDayKey: null,
+    planCollapsed: false
   };
 
   const fmtDist = (m, dec) => DS.units.dist(m, DS.settingsStore.get().units, dec == null ? 1 : dec);
@@ -1153,10 +1154,27 @@
             DS.h('span', null, `${a.adherence}% weeks completed`)
           );
 
+    const fmtStart = (d) => new Date(d).toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const isRun = plan.sport === 'run';
+    const longPlannedOf = (w) => w.planned.longKm || w.planned.runLongKm || null;
+    const longActualOf = (w) => (isRun ? w.actual.runLongKm : w.actual.longKm) || 0;
     const table = DS.h(
       'table',
-      { class: 'ds-table' },
-      DS.h('thead', null, DS.h('tr', null, DS.h('th', null, 'Wk'), DS.h('th', null, 'Long'), DS.h('th', null, 'Hours'), DS.h('th', null, 'Hard'), DS.h('th', null, 'Status'))),
+      { class: 'ds-table ds-plan-table' },
+      DS.h(
+        'thead',
+        null,
+        DS.h('tr', null,
+          DS.h('th', null, 'Wk'),
+          DS.h('th', null, 'Week of'),
+          DS.h('th', null, isRun ? 'Long run' : 'Long ride'),
+          DS.h('th', null, 'Hours'),
+          DS.h('th', null, 'Sessions'),
+          DS.h('th', null, 'Hard'),
+          DS.h('th', null, 'Status'),
+          DS.h('th', null, 'Note')
+        )
+      ),
       DS.h(
         'tbody',
         null,
@@ -1164,22 +1182,49 @@
           DS.h(
             'tr',
             { class: w === cur ? 'ds-cur-week' : '' },
-            DS.h('td', null, String(w.index + 1)),
-            DS.h('td', null, w.planned.longKm ? `${fmtKm(w.actual.longKm, 0)} / ${fmtKm(w.planned.longKm, 0)}` : '—'),
+            DS.h('td', { class: 'ds-num' }, String(w.index + 1)),
+            DS.h('td', { class: 'ds-dim' }, fmtStart(w.start)),
+            DS.h(
+              'td',
+              null,
+              longPlannedOf(w) ? `${fmtKm(longActualOf(w), 0)} / ${fmtKm(longPlannedOf(w), 0)}` : '—'
+            ),
             DS.h('td', null, w.targetHours != null ? `${w.actual.hours.toFixed(1)} / ${w.targetHours}` : `${w.actual.hours.toFixed(1)} h`),
-            DS.h('td', null, w.planned.intensity ? `${Math.min(w.actual.intensity, 9)} / ${w.planned.intensity}` : '—'),
-            DS.h('td', null, DS.h('span', { class: `ds-pill ds-pill-${w.status}` }, STATUS_LABEL[w.status] || w.status))
+            DS.h('td', { class: 'ds-num' }, String(w.actual.sessions || 0)),
+            DS.h('td', null, longPlannedOf(w) ? `${Math.min(w.actual.intensity, 9)} / ${Math.min(w.planned.intensity || 0, 9)}` : '—'),
+            DS.h('td', null, DS.h('span', { class: `ds-pill ds-pill-${w.status}` }, STATUS_LABEL[w.status] || w.status)),
+            DS.h('td', { class: 'ds-plan-note' }, plan.tips[w.index] ? plan.tips[w.index] : '—')
           )
         )
       )
     );
+
+    const details = DS.h(
+      'div',
+      { class: 'ds-plan-details', hidden: state.planCollapsed ? '' : null },
+      adherenceBar,
+      nw ? DS.h('div', { class: 'ds-next' }, DS.h('strong', null, 'Next workout: '), nw.text) : null,
+      table,
+      plan.tips[cur.index] ? DS.h('div', { class: 'ds-hint' }, `💡 This week: ${plan.tips[cur.index]}`) : null,
+      DS.h('div', { class: 'ds-hint' }, `Sessions = how many days had an activity; hard sessions are estimated from your speed baseline and workout names — approximate.`)
+    );
+
+    const toggle = DS.h('button', {
+      class: 'ds-btn ds-btn-ghost ds-btn-xs',
+      type: 'button',
+      title: state.planCollapsed ? 'Show the week-by-week plan' : 'Hide the week-by-week plan',
+      onclick: () => {
+        state.planCollapsed = !state.planCollapsed;
+        renderDashboard();
+      }
+    }, state.planCollapsed ? '▶ Show plan' : '▼ Hide plan');
 
     wrap.append(
       DS.h(
         'div',
         { class: 'ds-group-actions' },
         DS.h('h3', null, `${plan.name} — week ${cur.index + 1} of ${plan.weeks}`),
-        DS.h('div', { class: 'ds-mode' }, evalNotice, aiEvalBtn, newAiBtn, regenBtn, DS.h('button', {
+        DS.h('div', { class: 'ds-mode' }, evalNotice, aiEvalBtn, newAiBtn, regenBtn, toggle, DS.h('button', {
           class: 'ds-btn ds-btn-ghost ds-btn-xs',
           type: 'button',
           onclick: async () => {
@@ -1190,11 +1235,7 @@
       ),
       aiModeRow(),
       DS.h('div', { class: 'ds-hint' }, `${a.raceInDays} days to go`),
-      adherenceBar,
-      nw ? DS.h('div', { class: 'ds-next' }, DS.h('strong', null, 'Next workout: '), nw.text) : null,
-      table,
-      plan.tips[cur.index] ? DS.h('div', { class: 'ds-hint' }, `💡 ${plan.tips[cur.index]}`) : null,
-      DS.h('div', { class: 'ds-hint' }, 'Hard sessions are estimated from your speed baseline and workout names — approximate.')
+      details
     );
     return wrap;
   }

@@ -69,6 +69,9 @@ describe('panel', () => {
     expect(drawer.querySelector('.ds-warning')).toBeTruthy();
     const searchDrawer = drawers.find((d) => d.querySelector('.ds-drawer-head').textContent.includes('historical'));
     expect(searchDrawer).toBeTruthy();
+    const testRow = [...drawer.querySelectorAll('.ds-field')].find((f) => f.querySelector('label')?.textContent.includes('AI connection test'));
+    expect(testRow).toBeTruthy();
+    expect(testRow.querySelector('button').textContent).toMatch(/Test/i);
   });
 
   it('drawer reflects the stored scan scope, not the default', async () => {

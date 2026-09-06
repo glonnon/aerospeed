@@ -53,6 +53,8 @@
       width: 100%; padding: 7px 9px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px;
     }
     .ds-ctl-range { display: flex; align-items: center; gap: 8px; }
+    .ds-ctl-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .ds-ctl-row .ds-hint { font-weight: 400; }
     .ds-ctl-range input { flex: 1; }
     .ds-range-val { font-size: 12px; font-weight: 600; min-width: 42px; text-align: right; }
     .ds-warning {
@@ -177,6 +179,12 @@
     .ds-plan-picker select, .ds-plan-picker input { padding: 7px 9px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
     .ds-plan .ds-table { margin-top: 10px; }
     .ds-cur-week { background: #fff4ed; }
+    .ds-plan-table td { padding: 4px 6px; font-size: 12.5px; }
+    .ds-plan-table th { font-size: 11px; padding: 4px 6px; }
+    .ds-num { text-align: right; }
+    .ds-dim { color: #777; font-size: 11.5px; }
+    .ds-plan-note { color: #666; font-size: 11.5px; max-width: 220px; }
+    .ds-plan-details[hidden] { display: none; }
     .ds-pill { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
     .ds-pill-done { background: #d1e7dd; color: #0a3622; }
     .ds-pill-partial { background: #fff3cd; color: #664d03; }

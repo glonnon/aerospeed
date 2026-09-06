@@ -2,7 +2,7 @@
   const root = typeof window !== 'undefined' ? window : globalThis;
   const DS = (root.DedupeStrava = root.DedupeStrava || {});
 
-  DS.VERSION = '0.25.7';
+  DS.VERSION = '0.25.8';
 
   DS.ext =
     typeof browser !== 'undefined' && browser?.runtime?.id

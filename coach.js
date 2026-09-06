@@ -70,6 +70,18 @@ object — no markdown, no commentary around it.`;
     const context = job.context || '';
 
     try {
+      if (job.task === 'test') {
+        const t = await DS.llm.testConnection({
+          mode: job.mode || settings?.llmMode,
+          llmUrl: settings?.llmUrl,
+          llmBaseUrl: settings?.llmBaseUrl,
+          llmApiKey: settings?.llmApiKey,
+          fetchImpl: (url, init) => fetch(url, init)
+        });
+        LOG(`${t.ok ? '✓' : '✗'} ${t.message}`);
+        await writeStorage('llmResult', { nonce: job.nonce, ok: t.ok, test: t.message, error: t.ok ? null : t.message });
+        return;
+      }
       if (mode === 'webgpu') {
         for (let attempt = 0; attempt < 2; attempt++) {
           const out = await runWebGpu(job, settings);
@@ -134,11 +146,14 @@ object — no markdown, no commentary around it.`;
     const baseUrl = clean((settings && settings.llmBaseUrl)) || 'https://api.openai.com/v1';
     const model = clean((settings && settings.llmOpenaiModel)) || 'gpt-4o-mini';
     const apiKey = clean(settings && settings.llmApiKey);
-    if (!apiKey) throw new Error('OpenAI mode needs an API key (Dashboard → Settings → API key).');
-    LOG(`[openai] Asking ${baseUrl.replace(/\/+$/, '')}/chat/completions (${model})…`);
+    // The key is optional: local / OpenAI-compatible endpoints often run without
+    // one. We only send Authorization when a key is actually configured.
+    const headers = { 'Content-Type': 'application/json' };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    LOG(`[openai] Asking ${baseUrl.replace(/\/+$/, '')}/chat/completions (${model})${apiKey ? '' : ' — no API key set'}…`);
     const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      headers,
       body: JSON.stringify({ model, messages: buildMessages(job, model), temperature: 0.2, max_tokens: 1400 })
     });
     if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}`);

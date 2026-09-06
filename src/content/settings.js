@@ -135,6 +135,7 @@
     }
 
     container.append(DS.h('div', { class: 'ds-field' }, DS.h('label', null, 'Device trust (top = best)'), renderRanking(s, store)));
+    container.append(renderLlmTest(s, store));
     container.append(
       DS.h(
         'div',
@@ -156,6 +157,58 @@
   function updateWarning(container, settings) {
     const w = container.querySelector('.ds-warning');
     if (w) w.classList.toggle('ds-visible', settings.deletionMode === 'auto');
+  }
+
+  // "Test connection" for the selected AI provider. Runs the check from the
+  // extension's own context so it can reach the endpoint; requests host
+  // permission for a custom OpenAI-compatible base URL when needed.
+  function renderLlmTest(s, store) {
+    const status = DS.h('span', { class: 'ds-hint' });
+    const btn = DS.h(
+      'button',
+      {
+        class: 'ds-btn ds-btn-ghost ds-btn-xs',
+        type: 'button',
+        title: `Test the current AI provider: ${s.llmMode}`,
+        onclick: async () => {
+          btn.disabled = true;
+          status.textContent = 'Testing…';
+          let mode = s.llmMode;
+          try {
+            if (mode === 'openai') {
+              const base = (s.llmBaseUrl || '').trim();
+              if (base && typeof chrome !== 'undefined' && chrome.permissions) {
+                let origin;
+                try {
+                  origin = new URL(base).origin;
+                } catch (e) {
+                  /* not a URL — fall through, the fetch will fail clearly */
+                }
+                if (origin) {
+                  const granted = await chrome.permissions.request({ permissions: ['tabs', 'scripting'], origins: [origin + '/*'] });
+                  if (!granted) {
+                    status.textContent = 'Permission for the endpoint host was not granted — test may still fail.';
+                  }
+                }
+              }
+            }
+            const r = await DS.llm.testConnection({ mode, llmUrl: s.llmUrl, llmBaseUrl: s.llmBaseUrl, llmApiKey: s.llmApiKey });
+            status.textContent = (r.ok ? '✓ ' : '✗ ') + r.message;
+          } catch (e) {
+            status.textContent = '✗ ' + String((e && e.message) || e);
+          } finally {
+            btn.disabled = false;
+          }
+        }
+      },
+      `Test ${s.llmMode === 'off' ? 'AI' : s.llmMode} connection`
+    );
+    return DS.h(
+      'div',
+      { class: 'ds-field' },
+      DS.h('label', null, 'AI connection test'),
+      DS.h('div', { class: 'ds-ctl-row' }, btn, status)
+    );
   }
 
   function renderRanking(s, store) {
