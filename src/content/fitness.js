@@ -54,10 +54,84 @@
     return { ctl: round1(last.ctl), atl: round1(last.atl), tsb: round1(last.tsb) };
   }
 
+  const WEEK = 7 * 86400000;
+
+  function weeklyLoads(activities, { weeks = 8, days = 0 } = {}) {
+    const loads = dailyLoad(activities, days || weeks * 7 + 7);
+    const now = new Date();
+    const first = new Date(now);
+    first.setHours(0, 0, 0, 0);
+    first.setDate(first.getDate() - ((first.getDay() + 6) % 7)); // current Monday
+    const out = [];
+    for (let i = 0; i < weeks; i++) {
+      const start = new Date(first);
+      start.setDate(first.getDate() - (weeks - 1 - i) * 7);
+      const endMs = start.getTime() + WEEK;
+      const load = loads
+        .filter((p) => p.date.getTime() >= start.getTime() && p.date.getTime() < endMs)
+        .reduce((s, p) => s + p.load, 0);
+      out.push({ weekStart: start, load: Math.round(load * 10) / 10 });
+    }
+    return out;
+  }
+
+  function guardrails(activities, { days = 90 } = {}) {
+    const loads = dailyLoad(activities, days);
+    const n = loads.length;
+    if (n < 14) return null;
+    const sumBlocks = (fromEnd, len) => {
+      const start = Math.max(0, n - fromEnd - len);
+      const end = n - fromEnd;
+      let t = 0;
+      for (let i = start; i < end; i++) t += loads[i].load;
+      return t;
+    };
+    const acute = sumBlocks(0, 7);
+    const prevAcute = sumBlocks(7, 7);
+    const chronic = sumBlocks(0, 28) / 4;
+    const rampPct = prevAcute > 0 ? Math.round(((acute - prevAcute) / prevAcute) * 100) : null;
+    const acwr = chronic > 0 ? Math.round((acute / chronic) * 10) / 10 : null;
+
+    const s = series(activities, { days });
+    const last = s[s.length - 1];
+    const aWeekAgo = s[Math.max(0, s.length - 8)];
+    const ctlDelta = last && aWeekAgo ? round1(last.ctl - aWeekAgo.ctl) : null;
+
+    const flags = [];
+    if (rampPct != null && rampPct > 15) flags.push('ramp');
+    if (ctlDelta != null && ctlDelta > 8) flags.push('ctl');
+    if (acwr != null && acwr > 1.5) flags.push('acwr-high');
+    else if (acwr != null && acwr >= 1.3) flags.push('acwr-mid');
+    else if (acwr != null && acwr < 0.8) flags.push('acwr-low');
+
+    return { acute, prevAcute, chronic, rampPct, ctlDelta, acwr, flags };
+  }
+
+  function monotonyScore(activities, { days = 42 } = {}) {
+    const loads = dailyLoad(activities, days).map((p) => p.load);
+    if (!loads.length) return null;
+    const active = loads.filter((l) => l > 0);
+    const total = loads.reduce((t, l) => t + l, 0);
+    if (total <= 0) return null;
+    const mean = total / loads.length;
+    const sd = Math.sqrt(loads.reduce((t, l) => t + (l - mean) ** 2, 0) / loads.length);
+    const monotony = sd <= 0 ? 5 : mean / sd;
+    const weeklySessions = active.length / Math.max(1, days / 7);
+    const strain = monotony * (active.reduce((t, l) => t + l, 0) / Math.max(1, days / 7));
+    return {
+      monotony: Math.round(monotony * 10) / 10,
+      strain: Math.round(strain * 10) / 10,
+      activeDays: active.length,
+      weeklySessions: Math.round(weeklySessions * 10) / 10,
+      flags: monotony >= 2 ? ['monotony'] : monotony >= 1.5 ? ['monotony-mid'] : [],
+      strainFlags: strain >= 350 ? ['strain-high'] : strain >= 250 ? ['strain-mid'] : []
+    };
+  }
+
+  const CHART = { W: 860, H: 210, pad: { l: 48, r: 14, t: 16, b: 26 } };
+
   function chartSvg(pts) {
-    const W = 860;
-    const H = 210;
-    const pad = { l: 48, r: 14, t: 16, b: 26 };
+    const { W, H, pad } = CHART;
     const iw = W - pad.l - pad.r;
     const ih = H - pad.t - pad.b;
     const maxN = Math.max(1, ...pts.map((p) => Math.max(p.ctl, p.atl, p.load)));
@@ -88,9 +162,11 @@
         out += `<text x="${xOf(i).toFixed(1)}" y="${H - 8}" font-size="10" fill="#888" text-anchor="middle">${pts[i].date.toLocaleString([], { month: 'short' })}</text>`;
       }
     }
+    out += `<line class="ds-fit-cursor" x1="-10" y1="${pad.t}" x2="-10" y2="${(pad.t + ih).toFixed(1)}" stroke="#bbb" stroke-width="1" visibility="hidden"/>`;
+    out += `<rect class="ds-fit-overlay" x="${pad.l}" y="${pad.t}" width="${iw}" height="${ih}" fill="none" pointer-events="all"/>`;
     out += '</svg>';
     return out;
   }
 
-  DS.fitness = { dailyLoad, series, snapshot, chartSvg };
+  DS.fitness = { dailyLoad, series, snapshot, chartSvg, CHART, weeklyLoads, guardrails, monotonyScore };
 })();

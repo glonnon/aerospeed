@@ -59,6 +59,24 @@ describe('settingsStore.sanitize', () => {
     expect(s.timeWindowMinutes).toBe(10);
     expect(s.minOverlapPct).toBe(80);
   });
+
+  it('sanitizes gear service intervals', () => {
+    const s = DS.settingsStore.sanitize({
+      gearService: {
+        b1: { everyKm: 3000, lastKm: 1200.5 },
+        b2: { everyKm: 'nope', lastKm: 0 },
+        b3: { everyKm: 500, lastKm: -5 },
+        b4: { everyKm: 0, lastKm: 100 },
+        b5: 'not-an-object'
+      }
+    });
+    expect(s.gearService.b1).toEqual({ everyKm: 3000, lastKm: 1200.5 });
+    expect(s.gearService.b2).toBeUndefined();
+    expect(s.gearService.b3).toEqual({ everyKm: 500, lastKm: 0 });
+    expect(s.gearService.b4).toBeUndefined();
+    expect(s.gearService.b5).toBeUndefined();
+    expect(DS.settingsStore.sanitize({}).gearService).toEqual({});
+  });
 });
 
 describe('settingsStore without extension APIs', () => {

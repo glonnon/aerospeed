@@ -2,7 +2,9 @@
 
 A browser extension that finds duplicate Strava activities, helps you keep the
 better copy, and cleans up the rest — with a local training dashboard, a
-fitness model, and goal-based AI coaching. All in your browser.
+fitness model, and goal-based AI coaching. All in your browser. Also works on
+**Intervals.icu** (the athlete *Activities* tab) with the same duplicate
+detection and cleanup.
 
 Works in **Chrome** (Manifest V3) and **Firefox**, runs **entirely in your
 browser** by default, and connects to your Strava session the same way Strava's
@@ -30,8 +32,16 @@ own page does.
 ### Training dashboard (built into the training page)
 - A third tab, **Training Goals & Summary**, sits next to *My Activities* /
   *Recently Deleted* with: activity calendar (click a day to see what you did),
-  distance-by-week charts, time-by-sport donut, summary cards, and a
-  **fitness model** (CTL / ATL / TSB).
+  distance-by-week charts, time-by-sport donut, summary cards, a
+  **fitness model** (CTL / ATL / TSB) with a hover tooltip, **load
+  guardrails** (ramp-rate, ACWR, monotony, strain), training **streaks &
+  consistency**, a "when you train" heatmap, **power & HR trends**, a **race
+  predictor**, year **goal tracking**, gear **maintenance reminders**, a
+  **data-quality report** (truncated GPS, implausible speeds, missing GPS), and
+  a downloadable **year-in-review share card**.
+- Hover the fitness chart to read CTL/ATL/TSB for any date along the timeline.
+- All metrics are computed locally from your activity index; HR/power/gps data
+  comes from the devices you record with.
 - **Audit-safe**: matching never deletes when data doesn't clearly match
   (missing fields = no action).
 

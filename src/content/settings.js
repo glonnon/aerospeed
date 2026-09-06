@@ -40,6 +40,8 @@
     { key: 'polylineThreshold', label: 'Route similarity', type: 'range', min: 0.3, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
     { key: 'deepGpsCheck', label: 'Deep GPS stream check (slower)', type: 'toggle' },
     { key: 'enrichPairs', label: 'Fetch detail pages for suspected duplicates (PRs, device, HR)', type: 'toggle' },
+    { key: 'goalDistanceKm', label: 'Year distance goal (km, 0 = off)', type: 'number', min: 0, max: 50000 },
+    { key: 'goalElevM', label: 'Year climbing goal (m, 0 = off)', type: 'number', min: 0, max: 500000 },
     {
       key: 'deletionMode',
       label: 'Deletion mode',

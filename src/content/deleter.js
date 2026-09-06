@@ -61,5 +61,5 @@
     return results;
   }
 
-  DS.deleter = { getCsrfToken, deleteActivity, deleteMany, deleteUrl };
+  DS.deleter = { getCsrfToken, deleteActivity, deleteMany, deleteUrl, logDeletion };
 })();

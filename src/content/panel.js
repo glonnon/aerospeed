@@ -20,6 +20,11 @@
   const fmtDist = (m, dec) => DS.units.dist(m, DS.settingsStore.get().units, dec == null ? 1 : dec);
   const fmtElev = (m) => DS.units.elev(m, DS.settingsStore.get().units);
   const fmtKm = (km, dec) => DS.units.kmTo(km, DS.settingsStore.get().units, dec == null ? 1 : dec);
+  const actUrl = (a) => DS.site.activityUrl(a.id);
+  const api = () =>
+    DS.site.id === 'intervals'
+      ? DS.icu
+      : { scanAll: DS.scanner.scanAll, deleteMany: DS.deleter.deleteMany, fetchActivityMeta: DS.scanner.fetchActivityMeta };
   const fmtTime = (s) => {
     if (s == null) return '—';
     const h = Math.floor(s / 3600);
@@ -174,6 +179,77 @@
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 
+  function downloadShareCard() {
+    try {
+      const stats = DS.viz.shareStats(state.activities, { filter: state.dashFilter || 'all' });
+      const W = 900;
+      const H = 420;
+      const c = document.createElement('canvas');
+      c.width = W;
+      c.height = H;
+      const ctx = c.getContext('2d');
+      if (!ctx) throw new Error('no canvas');
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, '#101418');
+      grad.addColorStop(1, '#24292f');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff';
+      ctx.font = '800 44px -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.fillText(`AeroSpeed ${new Date().getFullYear()}`, 48, 78);
+      ctx.font = '400 20px -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.fillStyle = '#ff8a65';
+      ctx.fillText('Year in review', 48, 112);
+      const cells = [
+        ['Activities', stats.count],
+        ['Distance', `${fmtDist(stats.distKm * 1000, 0)}`],
+        ['Time', `${stats.timeH} h`],
+        ['Climbing', fmtElev(stats.elevM)],
+        ['Best streak', `${stats.bestStreak} days`]
+      ];
+      const cx = W - 48 - 440;
+      const colW = 176;
+      const rowH = 52;
+      [
+        [0, 0],
+        [0, 1],
+        [1, 0],
+        [1, 1],
+        [0, 2]
+      ].forEach(([cc, rr], i) => {
+        const x = cx + cc * (colW + 22);
+        const y = 170 + rr * (rowH + 18);
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        ctx.beginPath();
+        ctx.roundRect(x, y, colW, rowH, 10);
+        ctx.fill();
+        ctx.fillStyle = '#ff8a65';
+        ctx.font = '12px -apple-system, Segoe UI, Roboto, sans-serif';
+        ctx.fillText(String(cells[i][0]).toUpperCase(), x + 14, y + 18);
+        ctx.fillStyle = '#fff';
+        ctx.font = '700 26px -apple-system, Segoe UI, Roboto, sans-serif';
+        ctx.fillText(String(cells[i][1]), x + 14, y + 43);
+      });
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.font = '15px -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.fillText(`All-time: ${stats.totalCount} activities · ${fmtDist(stats.totalDistKm * 1000, 0)}`, 48, H - 36);
+      c.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `aerospeed-year-${new Date().getFullYear()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      }, 'image/png');
+      els.status.textContent = 'Share card downloaded.';
+    } catch (e) {
+      console.error('[dedupe] share card failed', e);
+      els.status.textContent = `Share card failed: ${e.message}`;
+    }
+  }
+
   function exportActivitiesCSV(acts) {
     const cols = ['id', 'name', 'type', 'start_date_local', 'distance_m', 'moving_time_s', 'elevation_m', 'device', 'pr_count', 'achievement_count', 'kudos_count', 'source'];
     const esc = (v) => {
@@ -254,7 +330,7 @@
       const abort = { aborted: false };
       state.rangeAbort = abort;
       try {
-        const res = await DS.scanner.scanAll({
+        const res = await api().scanAll({
           settings: DS.settingsStore.get(),
           signal: abort,
           searchDateStart: cutoffIso,
@@ -309,7 +385,7 @@
       }
       els.status.textContent = `Scanning (${SCOPE_LABEL[scope] || scope})…`;
       const started = Date.now();
-      const res = await DS.scanner.scanAll({
+      const res = await api().scanAll({
         settings,
         signal: state.scanAbort,
         maxPages,
@@ -443,7 +519,7 @@
             'tbody',
             null,
             metricRow('Activity', (a) =>
-              DS.h('td', null, DS.h('a', { href: `https://www.strava.com/activities/${a.id}`, target: '_blank', rel: 'noreferrer' }, a.name || `#${a.id}`))
+              DS.h('td', null, DS.h('a', { href: actUrl(a), target: '_blank', rel: 'noreferrer' }, a.name || `#${a.id}`))
             ),
             metricRow('Start', (a) => DS.h('td', null, fmtDate(a.startDateLocal))),
             metricRow('Distance', (a) => DS.h('td', null, fmtDist(a.distanceM))),
@@ -508,7 +584,7 @@
   }
 
   function renderBottomBar(auto) {
-    const links = state.groups.flatMap((g) => g.remove.map((a) => `https://www.strava.com/activities/${a.id}`));
+    const links = state.groups.flatMap((g) => g.remove.map((a) => actUrl(a)));
     const bar = DS.h('div', { class: 'ds-bottom' });
     bar.append(renderModeSwitch());
     if (auto) {
@@ -579,7 +655,7 @@
     const abort = { aborted: false };
     state.delAbort = abort;
     els.scanBtn.disabled = true;
-    const results = await DS.deleter.deleteMany(ids, {
+    const results = await api().deleteMany(ids, {
       shouldAbort: () => abort.aborted,
       onProgress: ({ done, total, last }) => {
         btn.textContent = `Deleting ${done}/${total}… ${last.ok ? '✓' : '✗'} (click to stop)`;
@@ -725,6 +801,42 @@
       throw new Error('invalid svg markup');
     }
     return node;
+  }
+
+  function attachFitHover(wrap, svg, pts) {
+    const G = DS.fitness.CHART;
+    const overlay = svg.querySelector('.ds-fit-overlay');
+    const cursor = svg.querySelector('.ds-fit-cursor');
+    if (!overlay || !cursor || !pts.length) return;
+    const iw = G.W - G.pad.l - G.pad.r;
+    const r1 = (v) => Math.round(v * 10) / 10;
+    const tip = DS.h('div', { class: 'ds-fit-tip', hidden: '' });
+    wrap.append(tip);
+    overlay.addEventListener('mousemove', (e) => {
+      const rect = svg.getBoundingClientRect();
+      if (!rect.width) return;
+      const xV = ((e.clientX - rect.left) / rect.width) * G.W;
+      const i = Math.max(0, Math.min(pts.length - 1, Math.round(((xV - G.pad.l) / iw) * (pts.length - 1))));
+      const p = pts[i];
+      const cx = G.pad.l + (i * iw) / Math.max(1, pts.length - 1);
+      cursor.setAttribute('x1', cx.toFixed(1));
+      cursor.setAttribute('x2', cx.toFixed(1));
+      cursor.setAttribute('visibility', 'visible');
+      tip.textContent = '';
+      tip.append(
+        DS.h('div', { class: 'ds-fit-tip-date' }, p.date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })),
+        DS.h('div', null, `CTL ${r1(p.ctl)} · ATL ${r1(p.atl)} · TSB ${r1(p.tsb)}`)
+      );
+      const wrapRect = wrap.getBoundingClientRect();
+      const xPx = (cx / G.W) * rect.width + (rect.left - wrapRect.left);
+      tip.style.left = `${Math.max(0, Math.min(xPx + 12, wrapRect.width - 160))}px`;
+      tip.style.top = '34px';
+      tip.hidden = false;
+    });
+    overlay.addEventListener('mouseleave', () => {
+      tip.hidden = true;
+      cursor.setAttribute('visibility', 'hidden');
+    });
   }
 
   function mondayOf(d = new Date()) {
@@ -1109,6 +1221,175 @@
       );
     });
 
+    add('Rhythm', () => {
+      const s = DS.viz.streaks(state.activities, { days: 90, filter: f });
+      const flat = (v) => (v === 0 ? '0' : `${v}d`);
+      return DS.h(
+        'div',
+        { class: 'ds-cards' },
+        dashCard('Current streak', flat(s.current), null),
+        dashCard('Longest streak', flat(s.longest), null),
+        dashCard('Consistency (90d)', `${s.consistencyPct}%`, null),
+        dashCard('Longest gap (90d)', flat(s.longestGap), null)
+      );
+    });
+
+    add('Goals', () => {
+      const settings = DS.settingsStore.get();
+      const year = new Date().getFullYear();
+      const yearActs = state.activities.filter(
+        (a) => {
+          const d = new Date(a.startDateLocal);
+          return Number.isFinite(d.getTime()) && d.getFullYear() === year;
+        }
+      );
+      const distKm = yearActs.reduce((t, a) => t + (a.distanceM || 0) / 1000, 0);
+      const elevM = yearActs.reduce((t, a) => t + (a.elevationM || 0), 0);
+      const daysElapsed = Math.max(1, Math.round((Date.now() - new Date(`${year}-01-01`).getTime()) / 86400000));
+      const daysInYear = Math.round((Date.parse(`${year + 1}-01-01`) - Date.parse(`${year}-01-01`)) / 86400000);
+      const progress = (done, goal) => (goal > 0 ? Math.min(100, Math.round((done / goal) * 100)) : null);
+      const pace = (done, goal) => (goal > 0 ? goal * (daysElapsed / daysInYear) : 0);
+      const style = (done, goal) => (goal > 0 && done / goal < daysElapsed / daysInYear ? 'down' : 'up');
+      const details = [];
+      if (settings.goalDistanceKm > 0) {
+        const g = settings.goalDistanceKm;
+        details.push([
+          'Distance',
+          `${fmtDist(distKm * 1000, 0)} / ${fmtDist(g * 1000, 0)}`,
+          progress(distKm, g),
+          style(distKm, g),
+          `${fmtDist(Math.round(pace(distKm, g) * 1000), 0)} of pace this week`,
+          DS.h('button', { class: 'ds-btn ds-btn-xs ds-btn-ghost', type: 'button', onclick: async () => { const v = parseFloat(prompt('Year distance goal (km):', String(g)) || '0'); if (Number.isFinite(v) && v >= 0) { await DS.settingsStore.save({ goalDistanceKm: v }); renderDashboard(); } } }, '⚙')
+        ]);
+      } else {
+        details.push(['Distance', `${fmtDist(distKm * 1000, 0)} this year`, null, '', '', DS.h('button', { class: 'ds-btn ds-btn-xs ds-btn-ghost', type: 'button', onclick: async () => { const v = parseFloat(prompt('Year distance goal (km):', '1000') || '0'); if (Number.isFinite(v) && v >= 0) { await DS.settingsStore.save({ goalDistanceKm: v }); renderDashboard(); } } }, 'Set goal')]);
+      }
+      if (settings.goalElevM > 0) {
+        const g = settings.goalElevM;
+        details.push([
+          'Climbing',
+          `${fmtElev(elevM)} / ${fmtElev(g)}`,
+          progress(elevM, g),
+          style(elevM, g),
+          `${fmtElev(Math.round(pace(elevM, g)))} of pace this week`,
+          DS.h('button', { class: 'ds-btn ds-btn-xs ds-btn-ghost', type: 'button', onclick: async () => { const v = parseFloat(prompt('Year climbing goal (m):', String(g)) || '0'); if (Number.isFinite(v) && v >= 0) { await DS.settingsStore.save({ goalElevM: v }); renderDashboard(); } } }, '⚙')
+        ]);
+      }
+      const row = (label, val, pct, tone, paceTxt, ctl) =>
+        DS.h(
+          'div',
+          { class: 'ds-top-row' },
+          DS.h('span', null, label),
+          DS.h('span', null, val, DS.h('span', { class: 'ds-hint', style: 'margin-left:8px' }, pct == null ? '' : `${pct}%`), DS.h('span', { class: `ds-stat-delta ${tone}`, style: 'margin-left:8px;display:inline' }, paceTxt), DS.h('span', { style: 'margin-left:8px' }, ctl))
+        );
+      if (!details.length) {
+        details.push(['Distance', `${fmtDist(distKm * 1000, 0)} this year`, null, '', '', DS.h('button', { class: 'ds-btn ds-btn-xs', type: 'button', onclick: async () => { const v = parseFloat(prompt('Year distance goal (km):', '1000') || '0'); if (Number.isFinite(v) && v >= 0) { await DS.settingsStore.save({ goalDistanceKm: v }); renderDashboard(); } } }, 'Set goals')]);
+      }
+      return DS.h('div', { class: 'ds-chart ds-top' },
+        DS.h('h3', null, `Goals — ${year}`),
+        ...details.map((x) => row(...x)),
+        DS.h('div', { class: 'ds-hint' }, 'Goals live in Settings. "Pace" is where you need to be to finish on time today.')
+      );
+    });
+
+    add('When you train', () => {
+      const hm = DS.viz.heatmap(state.activities, { days: 180, filter: f });
+      if (!hm.total) return null;
+      const cell = 16;
+      const gap = 2;
+      const left = 26;
+      const top = 16;
+      const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      const W = left + 24 * (cell + gap) + 6;
+      const H = top + 7 * (cell + gap) + 6;
+      let svg = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
+      for (let d = 0; d < 7; d++) {
+        svg += `<text x="${left - 5}" y="${top + d * (cell + gap) + cell - 3}" font-size="9" fill="#aaa" text-anchor="end">${DAYS[d]}</text>`;
+        for (let h = 0; h < 24; h++) {
+          const hours = hm.matrix[d][h];
+          const a = hours > 0 ? Math.max(0.12, Math.min(1, 0.25 + (hours / hm.max) * 0.75)) : 0;
+          const fill = hours > 0 ? `rgba(252,76,2,${a.toFixed(2)})` : '#efefef';
+          svg += `<rect x="${left + h * (cell + gap)}" y="${top + d * (cell + gap)}" width="${cell}" height="${cell}" rx="2.5" fill="${fill}"><title>${DAYS[d]} ${String(h).padStart(2, '0')}:00 — ${Math.round(hours * 10) / 10} h</title></rect>`;
+        }
+      }
+      for (let h = 0; h < 24; h += 4) {
+        svg += `<text x="${left + h * (cell + gap)}" y="11" font-size="9" fill="#888" text-anchor="middle">${('' + h).padStart(2, '0')}</text>`;
+      }
+      svg += '</svg>';
+      return DS.h(
+        'div',
+        { class: 'ds-chart' },
+        DS.h('h3', null, 'When you train — last 180 days'),
+        svgFromMarkup(svg)
+      );
+    });
+
+    add('Power & HR trends', () => {
+      const t = DS.viz.monthlyTrends(state.activities, { filter: f });
+      if (!t.months.length || (!t.anyHr && !t.anyW)) return null;
+      const W = 860;
+      const H = 150;
+      const pad = { l: 40, r: 10, t: 12, b: 24 };
+      const iw = W - pad.l - pad.r;
+      const ih = H - pad.t - pad.b;
+      const max = Math.max(1, ...t.months.map((m) => Math.max(m.hr || 0, m.watts || 0)));
+      const xOf = (i) => pad.l + (i * iw) / Math.max(1, t.months.length - 1);
+      const yOf = (v) => pad.t + ih - ((v || 0) / max) * ih;
+      const line = (arr, key, stroke) => arr.map((m, i) => `${xOf(i).toFixed(1)},${yOf(m[key]).toFixed(1)}`).join(' ');
+      let svg = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
+      for (let g = 0; g <= 4; g++) {
+        const y = pad.t + (ih * g) / 4;
+        svg += `<line x1="${pad.l}" y1="${y.toFixed(1)}" x2="${W - pad.r}" y2="${y.toFixed(1)}" stroke="#efefef"/>`;
+        svg += `<text x="${pad.l - 6}" y="${(y + 3).toFixed(1)}" font-size="10" fill="#999" text-anchor="end">${Math.round((max * (4 - g)) / 4)}</text>`;
+      }
+      if (t.anyHr) svg += `<polyline points="${line(t.months, 'hr', null)}" fill="none" stroke="#136ffd" stroke-width="2"/>`;
+      if (t.anyW) svg += `<polyline points="${line(t.months, 'watts', null)}" fill="none" stroke="#fc4c02" stroke-width="2"/>`;
+      t.months.forEach((m, i) => {
+        const label = m.d.toLocaleString([], { month: 'short', year: '2-digit' });
+        svg += `<text x="${xOf(i).toFixed(1)}" y="${H - 6}" font-size="9" fill="#999" text-anchor="middle">${label}</text>`;
+      });
+      svg += '</svg>';
+      return DS.h(
+        'div',
+        { class: 'ds-chart ds-chart-wide' },
+        DS.h('h3', null, `Power & HR trends — peak monthly avg${t.anyHr && t.anyW ? ' (blue HR, orange power)' : t.anyHr ? ' (HR)' : ' (power)'}`),
+        svgFromMarkup(svg),
+        DS.h('div', { class: 'ds-vol-legend' }, DS.h('span', { class: 'ds-hint' }, 'Based on average HR/power recorded on your devices. Strava list rows carry little of this — Intervals.icu rows carry it all.'))
+      );
+    });
+
+    add('Race predictor', () => {
+      const pred = DS.viz.racePredictor(state.activities, { filter: f, distanceKm: 40 });
+      if (!pred) return null;
+      const fmt = (secs) => {
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        const s = Math.round(secs % 60);
+        return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+      };
+      return DS.h(
+        'div',
+        { class: 'ds-chart' },
+        DS.h('h3', null, `Race predictor — 40 km from CTL ${pred.ctl} / form ${pred.form > 0 ? '+' : ''}${pred.form}`),
+        DS.h('div', { class: 'ds-stat-val' }, fmt(pred.predictedHms)),
+        DS.h('div', { class: 'ds-hint' }, `Extrapolated from your best recent ${Math.round(pred.refKm)} km at ${pred.bestKph} km/h. Rough estimate, not gospel.`),
+        DS.h('button', {
+          class: 'ds-btn ds-btn-ghost ds-btn-xs',
+          type: 'button',
+          onclick: async () => {
+            const km = parseFloat(prompt('Distance to predict (km):', '40') || '40');
+            if (Number.isFinite(km) && km > 0) {
+              const p = DS.viz.racePredictor(state.activities, { filter: f, distanceKm: km });
+              const h = Math.floor(p.predictedHms / 3600);
+              const m = Math.floor((p.predictedHms % 3600) / 60);
+              els.status.textContent = `Predicted ${km} km: ${h}h ${String(m).padStart(2, '0')}m.`;
+              renderDashboard();
+            }
+          }
+        }, 'Change distance')
+      );
+    });
+
     add('Distance by week', () => {
       const spanDays = loadedSpanDays();
       const fit = DS.viz.fitRange(spanDays);
@@ -1193,17 +1474,57 @@
       );
     });
 
+    add('Load guardrails', () => {
+      const g = DS.fitness.guardrails(state.activities);
+      const m = DS.fitness.monotonyScore(state.activities);
+      if (!g && !m) return null;
+      const cell = (label, value, tone, hint) =>
+        DS.h(
+          'div',
+          { class: `ds-stat ${tone ? `ds-stat-${tone}` : ''}` },
+          DS.h('div', { class: 'ds-stat-val' }, value),
+          DS.h('div', { class: 'ds-stat-label' }, label),
+          hint ? DS.h('div', { class: 'ds-stat-delta' }, hint) : null
+        );
+      const rampTone = g.rampPct == null ? '' : g.rampPct > 15 ? 'down' : '';
+      const ctlTone = g.ctlDelta == null ? '' : Math.abs(g.ctlDelta) > 8 ? 'down' : g.ctlDelta > 0 ? 'up' : '';
+      const acwrTone = g.acwr == null ? '' : g.acwr > 1.5 ? 'down' : g.acwr >= 1.3 ? 'up' : g.acwr < 0.8 ? 'up' : '';
+      const mono = m.monotony;
+      const monoTone = mono != null ? (mono >= 2 ? 'down' : mono >= 1.5 ? 'down' : '') : '';
+      const strain = m.strain;
+      const strainTone = strain != null ? (strain >= 350 ? 'down' : strain >= 250 ? 'down' : '') : '';
+      const warn = [...(g?.flags || []), ...(m?.flags || []), ...(m?.strainFlags || [])];
+      return DS.h(
+        'div',
+        { class: 'ds-chart ds-chart-wide' },
+        DS.h('h3', null, 'Load guardrails — last 7 days'),
+        DS.h(
+          'div',
+          { class: 'ds-cards' },
+          cell('Ramp vs prev 7d', g == null ? '—' : g.rampPct == null ? '—' : `${g.rampPct > 0 ? '+' : ''}${g.rampPct}%`, rampTone, g != null && g.rampPct != null && g.rampPct > 15 ? 'Jump above 15% often marks overreaching' : 'Hours change vs the week before'),
+          cell('ACWR (acute:chronic)', g == null ? '—' : g.acwr == null ? '—' : g.acwr, acwrTone, g == null || g.acwr == null ? 'Not enough history' : g.acwr > 1.5 ? 'Above 1.5 — high injury risk' : g.acwr >= 1.3 ? 'Caution zone (1.3–1.5)' : g.acwr < 0.8 ? 'Low load — detraining' : 'Sweet spot (0.8–1.3)'),
+          cell('CTL Δ / week', g == null ? '—' : g.ctlDelta == null ? '—' : `${g.ctlDelta > 0 ? '+' : ''}${g.ctlDelta}`, ctlTone, 'Fitness change over the last 7 days'),
+          cell('Monotony', mono == null ? '—' : mono, monoTone, mono == null ? 'Need a few weeks of history' : mono >= 2 ? '≥ 2 — same-ish every day, add variety' : mono >= 1.5 ? 'Risky range' : 'Plenty of variety'),
+          cell('Training strain', strain == null ? '—' : strain, strainTone, strain == null ? 'Need active days' : strain >= 350 ? '≥ 350 — sustained overload' : strain >= 250 ? 'High' : 'Controllable')
+        ),
+        warn.length
+          ? DS.h('div', { class: 'ds-vol-legend' }, DS.h('span', { class: 'ds-hint' }, `⚠ ${warn.map((w) => ({ ramp: 'ramp jump', ctl: 'CTL spike', 'acwr-high': 'ACWR high', 'acwr-mid': 'ACWR caution', 'acwr-low': 'ACWR low', monotony: 'monotony', 'monotony-mid': 'monotony risk', 'strain-high': 'strain high', 'strain-mid': 'strain ris' })[w]).join(', ')} this week — ease off or pace it.`))
+          : null
+      );
+    });
+
     add('Fitness & freshness', () => {
       const fit = DS.viz.fitRange(loadedSpanDays());
       const days = Math.min(120, fit.calDays);
       const pts = DS.fitness ? DS.fitness.series(state.activities, { days }) : [];
       if (!DS.fitness || !pts.length) return null;
       const snap = DS.fitness.snapshot(state.activities, { days });
-      return DS.h(
+      const svg = svgFromMarkup(DS.fitness.chartSvg(pts));
+      const wrap = DS.h(
         'div',
-        { class: 'ds-chart ds-chart-wide' },
+        { class: 'ds-chart ds-chart-wide ds-fit-wrap' },
         DS.h('h3', null, `Fitness (CTL · ATL · TSB) — last ${days} days`),
-        svgFromMarkup(DS.fitness.chartSvg(pts)),
+        svg,
         DS.h(
           'div',
           { class: 'ds-vol-legend' },
@@ -1213,6 +1534,8 @@
           snap ? DS.h('span', { class: 'ds-legend-row' }, `CTL ${snap.ctl} · ATL ${snap.atl} · TSB ${snap.tsb}`) : null
         )
       );
+      attachFitHover(wrap, svg, pts);
+      return wrap;
     });
 
     add('Time by sport', () => {
@@ -1236,13 +1559,16 @@
       const top = DS.viz.topActivities(state.activities, { n: 5, withinDays: 90, filter: f });
       const topEl = DS.h('div', { class: 'ds-chart ds-top' });
       topEl.append(DS.h('h3', null, 'Longest in last 90 days'));
-      for (const { a } of top) {
+      for (const { a, d } of top) {
+        const when = d ? d.toLocaleDateString([], { month: 'short', day: 'numeric' }) : '—';
+        const agoN = d ? Math.max(0, Math.round((Date.now() - d.getTime()) / 86400000)) : null;
+        const ago = agoN == null ? '' : agoN === 0 ? 'today' : agoN === 1 ? '1 day ago' : `${agoN} days ago`;
         topEl.append(
           DS.h(
             'div',
             { class: 'ds-top-row' },
-            DS.h('a', { href: `https://www.strava.com/activities/${a.id}`, target: '_blank', rel: 'noreferrer' }, a.name || `#${a.id}`),
-            DS.h('span', null, `${((a.distanceM || 0) / 1000).toFixed(1)} km · ${fmtTime(a.movingTimeS)}`)
+            DS.h('a', { href: actUrl(a), target: '_blank', rel: 'noreferrer' }, a.name || `#${a.id}`),
+            DS.h('span', null, `${when}${ago ? ` (${ago})` : ''} · ${((a.distanceM || 0) / 1000).toFixed(1)} km · ${fmtTime(a.movingTimeS)}`)
           )
         );
       }
@@ -1250,40 +1576,146 @@
       return topEl;
     });
 
+    add('Data quality', () => {
+      const issues = DS.viz.qualityFlags(state.activities, { filter: f, n: 30 });
+      if (!issues.length) return null;
+      const LABEL = {
+        'no-gps': 'No GPS',
+        'speed-high': 'Implausible speed',
+        'speed-low': 'Very slow for distance',
+        'hr-weird': 'Suspicious HR',
+        truncated: 'Truncated GPS'
+      };
+      const rows = issues.map(({ a, flags, detail }) =>
+        DS.h(
+          'div',
+          { class: 'ds-top-row' },
+          DS.h('a', { href: actUrl(a), target: '_blank', rel: 'noreferrer' }, a.name || `#${a.id}`),
+          DS.h('span', null, flags.map((fl) => LABEL[fl] || fl).join(', '), detail.length ? DS.h('span', { class: 'ds-hint', style: 'margin-left:8px' }, `(${detail.join('; ')})`) : null)
+        )
+      );
+      return DS.h('div', { class: 'ds-chart ds-top' },
+        DS.h('h3', null, `Data quality — ${issues.length} flagged`),
+        ...rows,
+        DS.h('div', { class: 'ds-hint' }, 'Suspicious speed/HR/GPS heuristics — check before deleting anything.'));
+    });
+
     add('Gear mileage', () => {
       const gears = DS.viz.gearSummary(state.activities, { filter: f });
       if (!gears.length) return null;
       const units = DS.settingsStore.get().units;
       const names = buildGearNameMap();
-      const rows = gears.slice(0, 12).map((g) =>
-        DS.h(
-          'div',
-          { class: 'ds-top-row' },
-          DS.h('a', { href: null }, names[g.gearId] ? `${names[g.gearId]}` : `Gear #${g.gearId}`),
-          DS.h('span', null, `${g.count} rides · ${DS.units.dist(g.distM, units, 0)} · ${fmtTime(g.timeS)}`)
-        )
-      );
+      const gs = DS.settingsStore.get().gearService || {};
+      const save = async (patch) => {
+        await DS.settingsStore.save({ gearService: { ...gs, ...patch } });
+        renderDashboard();
+      };
+      const rows = gears.slice(0, 12).map((g) => {
+        const name = names[g.gearId] ? names[g.gearId] : `Gear #${g.gearId}`;
+        const svc = gs[g.gearId];
+        const distKm = g.distM / 1000;
+        const sinceKm = svc && svc.everyKm ? Math.max(0, distKm - (svc.lastKm || 0)) : null;
+        const remainingKm = sinceKm != null ? svc.everyKm - sinceKm : null;
+        const due = remainingKm != null && remainingKm <= 0;
+        const dueSoon = remainingKm != null && !due && remainingKm < svc.everyKm * 0.1;
+        const setInterval = DS.h('button', {
+          class: 'ds-btn ds-btn-xs ds-btn-ghost',
+          type: 'button',
+          title: svc ? `Service every ${svc.everyKm} km` : 'Set a service interval (km)',
+          onclick: async () => {
+            const km = parseFloat(prompt(`Service interval for ${name} (km):`, String(svc?.everyKm || 3000)) || '');
+            if (!Number.isFinite(km) || km <= 0) return;
+            await save({ [g.gearId]: { everyKm: km, lastKm: svc?.lastKm ?? 0 } });
+          }
+        }, '🔧');
+        const serviced = DS.h('button', {
+          class: 'ds-btn ds-btn-xs ds-btn-ghost',
+          type: 'button',
+          title: 'Mark this gear as just serviced',
+          disabled: svc ? null : '',
+          onclick: async () => {
+            await save({ [g.gearId]: { everyKm: svc?.everyKm || 3000, lastKm: distKm } });
+          }
+        }, '✓ svc');
+        const wrap = DS.h('div', null,
+          DS.h(
+            'div',
+            { class: 'ds-top-row' },
+            DS.h('a', { href: null }, name),
+            DS.h('span', null, `${g.count} rides · ${DS.units.dist(g.distM, units, 0)} · ${fmtTime(g.timeS)}`),
+            serviced,
+            setInterval
+          ),
+          g.distM > 0 && g.timeS > 0
+            ? DS.h(
+                'div',
+                { class: 'ds-top-sub' },
+                `avg ${(g.distM / g.timeS * 3.6).toFixed(1)} km/h · climbs ${DS.units.elev(g.elevM, units)}`
+              )
+            : null,
+          svc && sinceKm != null
+            ? DS.h(
+                'div',
+                { class: `ds-top-sub ${due ? 'ds-due' : dueSoon ? 'ds-due-soon' : ''}` },
+                `since service ${DS.units.dist(sinceKm * 1000, units, 0)} of ${DS.units.dist(svc.everyKm * 1000, units, 0)}` +
+                  (remainingKm > 0 ? ` — ${DS.units.dist(remainingKm * 1000, units, 0)} left` : '') +
+                  (due ? ' — OVERDUE' : dueSoon ? ' — due soon' : '')
+              )
+            : null
+        );
+        return wrap;
+      });
       return DS.h('div', { class: 'ds-chart ds-top' },
         DS.h('h3', null, 'Gear mileage'),
         ...rows,
-        DS.h('div', { class: 'ds-hint' }, 'Gear names are read from the page when available; otherwise shown by id.'));
+        DS.h('div', { class: 'ds-hint' }, 'Gear names are read from the page when available; otherwise shown by id. Set a 🔧 interval to track time since service.'));
     });
 
     add('Year in review', () => {
       const years = DS.viz.yearSummaries(state.activities, { filter: f });
       if (!years.length) return null;
       const units = DS.settingsStore.get().units;
-      const rows = years.slice(0, 8).map((y) =>
-        DS.h(
-          'div',
-          { class: 'ds-top-row' },
-          DS.h('span', null, String(y.year)),
-          DS.h('span', null, `${y.count} rides · ${DS.units.distNum(y.distKm * 1000, units) != null ? `${DS.units.dist(y.distKm * 1000, units, 0)}` : ''} · ${Math.round(y.timeH * 10) / 10} h · ${DS.units.elev(y.elevM, units)}`)
-        )
-      );
+      const totals = (y) => `${y.count} · ${DS.units.dist(y.distKm * 1000, units, 0)} · ${Math.round(y.timeH * 10) / 10} h · ${DS.units.elev(y.elevM, units)}`;
+      const bySport = {};
+      if (f === 'all') {
+        for (const g of DS.viz.GROUPS) bySport[g] = DS.viz.yearSummaries(state.activities, { filter: g });
+      }
+      const rows = [];
+      for (const y of years.slice(0, 8)) {
+        rows.push(
+          DS.h(
+            'div',
+            { class: 'ds-top-row' },
+            DS.h('span', null, String(y.year)),
+            DS.h('span', null, totals(y))
+          )
+        );
+        for (const g of DS.viz.GROUPS) {
+          const ys = (bySport[g] || []).find((x) => x.year === y.year);
+          if (!ys || !ys.count) continue;
+          rows.push(
+            DS.h(
+              'div',
+              { class: 'ds-top-row ds-top-sub' },
+              DS.h('span', null, g[0].toUpperCase() + g.slice(1)),
+              DS.h('span', null, totals(ys))
+            )
+          );
+        }
+      }
       return DS.h('div', { class: 'ds-chart ds-top' },
         DS.h('h3', null, 'Year in review'),
-        ...rows);
+        ...rows,
+        DS.h(
+          'div',
+          { class: 'ds-group-actions' },
+          DS.h('button', {
+            class: 'ds-btn ds-btn-ghost ds-btn-xs',
+            type: 'button',
+            onclick: () => downloadShareCard()
+          }, '⬇ Share card (PNG)')
+        )
+      );
     });
     };
     ensureLlmPlan().then(async (p) => {
@@ -1644,6 +2076,7 @@
   }
 
   async function enrichState() {
+    if (DS.site.id !== 'strava') return; // icu API rows are already fully enriched
     if (!DS.settingsStore.get().enrichPairs) return;
     const needed = state.groups.flatMap((g) => g.scores.map((s) => s.act));
     const todo = needed.filter((a) => !a.prCount && !a.hasHr && !a.deviceName);
@@ -1703,7 +2136,7 @@
               searchDateStart = new Date(Date.now() - Number(scope) * 86400000).toISOString().slice(0, 10);
             }
           }
-          const res = await DS.scanner.scanAll({ settings, maxPages, stopAfter, searchDateStart, delayMs: 200 });
+          const res = await api().scanAll({ settings, maxPages, stopAfter, searchDateStart, delayMs: 200 });
           state.activities = res.activities;
           state.groups = DS.dedupe.findGroups(state.activities, settings);
           console.info(`[dedupe] auto-scan: ${res.activities.length} activities, ${state.groups.length} duplicate groups`);
@@ -1715,7 +2148,7 @@
         }
 
         const knownIds = new Set(state.activities.map((a) => a.id));
-        const res = await DS.scanner.scanAll({ settings, knownIds, maxPages: 10, delayMs: 200 });
+        const res = await api().scanAll({ settings, knownIds, maxPages: 10, delayMs: 200 });
         console.info(`[dedupe] cache: ${state.activities.length} cached, ${res.activities.length} new`);
         if (res.activities.length) {
           const newIds = new Set(res.activities.map((a) => a.id));
@@ -1750,7 +2183,7 @@
     });
     const links = document.querySelectorAll('a[href*="/activities/"]');
     for (const link of links) {
-      const m = (link.getAttribute('href') || '').match(/\/activities\/(\d+)/);
+      const m = (link.getAttribute('href') || '').match(DS.site.linkIdRe);
       if (!m || !map.has(m[1])) continue;
       const row = link.closest('tr, .training-activity-row, li');
       if (!row || row.querySelector('.ds-dup-badge')) continue;
@@ -1792,6 +2225,12 @@
       s.textContent = DS.PAGE_CSS;
       document.head?.append(s);
     }
+    if (DS.site.id !== 'strava') {
+      // No tab strip to hook into off Strava — the floating panel is the UI.
+      watchTable();
+      autoScan();
+      return;
+    }
     let tries = 0;
     const attempt = () => {
       tries += 1;
@@ -1816,7 +2255,7 @@
     const settings = DS.settingsStore.get();
     els.status.textContent = `Searching ${from} → ${to}…`;
     try {
-      const res = await DS.scanner.scanAll({
+      const res = await api().scanAll({
         settings,
         searchDateStart: from,
         searchDateEnd: to,
@@ -1845,14 +2284,14 @@
   }
 
   async function searchById(idRaw) {
-    const id = String(idRaw || '').replace(/\D/g, '');
+    const id = DS.site.parseIdInput(idRaw);
     if (!id) {
-      els.status.textContent = 'Enter an activity number (the digits in its URL).';
+      els.status.textContent = DS.site.id === 'intervals' ? 'Enter an activity id (from its URL).' : 'Enter an activity number (the digits in its URL).';
       return;
     }
     els.status.textContent = `Fetching activity #${id}…`;
     try {
-      const meta = await DS.scanner.fetchActivityMeta(id);
+      const meta = await api().fetchActivityMeta(id);
       if (!meta) {
         els.status.textContent = `Activity #${id} not found (private, deleted, or not yours).`;
         return;
@@ -1869,7 +2308,7 @@
       const from = new Date(t - 21 * 86400000).toISOString().slice(0, 10);
       const to = new Date(t + 86400000).toISOString().slice(0, 10);
       const settings = DS.settingsStore.get();
-      const res = await DS.scanner.scanAll({
+      const res = await api().scanAll({
         settings,
         searchDateStart: from,
         searchDateEnd: to,

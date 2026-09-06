@@ -155,6 +155,16 @@
     .ds-top-row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid #f2f2f2; font-size: 13px; }
     .ds-top-row a { color: #136ffd; text-decoration: none; }
     .ds-top-row a:hover { text-decoration: underline; }
+    .ds-top-sub { font-size: 12px; color: #666; padding-left: 14px; }
+    .ds-top-sub.ds-due { color: #b02a37; font-weight: 700; }
+    .ds-top-sub.ds-due-soon { color: #b45309; }
+    .ds-fit-wrap { position: relative; }
+    .ds-fit-tip {
+      position: absolute; z-index: 5; background: #fff; border: 1px solid #ddd; border-radius: 8px;
+      padding: 6px 9px; font-size: 12px; color: #333; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+      pointer-events: none; white-space: nowrap;
+    }
+    .ds-fit-tip-date { font-weight: 600; margin-bottom: 2px; }
     .ds-plan { grid-column: 1 / -1; }
     .ds-ai-card {
       border: 1px solid #fc4c02; border-radius: 8px; padding: 8px 10px; margin: 6px 0 10px;

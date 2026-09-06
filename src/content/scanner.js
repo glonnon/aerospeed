@@ -87,6 +87,8 @@
       hasHr: j.has_heartrate ?? !!j.average_heartrate,
       hasPower: j.device_watts ?? (j.average_watts != null),
       hasCadence: j.average_cadence != null,
+      averageHr: num(j.average_heartrate),
+      averageWatts: num(j.average_watts ?? j.weighted_average_watts),
       manual: j.manual ?? false,
       kudosCount: num(j.kudos_count) || 0,
       commentCount: num(j.comment_count) || 0,

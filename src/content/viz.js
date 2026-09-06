@@ -89,7 +89,7 @@
         type: a.type,
         distanceM: a.distanceM,
         movingTimeS: a.movingTimeS,
-        url: `https://www.strava.com/activities/${a.id}`
+        url: (DS.site?.activityUrl || ((id) => `https://www.strava.com/activities/${id}`))(a.id)
       });
       byDay.set(k, entry);
     }
@@ -134,7 +134,7 @@
       totals[g] += t;
       sum += t;
     }
-    return GROUPS.map((g) => ({ group: g, label: g[0].toUpperCase() + g.slice(1), hours: Math.round(totals[g] * 10) / 10, pct: sum > 0 ? Math.round((totals[g] / sum) * 100) : 0 }));
+    return GROUPS.map((g) => ({ group: g, label: g[0].toUpperCase() + g.slice(1), hours: Math.round(totals[g] * 10) / 10, pct: sum > 0 ? Math.floor((totals[g] / sum) * 100) : 0 }));
   }
 
   function topActivities(activities, { n = 5, withinDays = 0, filter = 'all' } = {}) {
@@ -246,7 +246,7 @@
       out += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${COLORS[s.group]}" stroke-width="18" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})"><title>${s.label}: ${s.pct}% (${s.hours} h)</title></circle>`;
       offset += len;
     }
-    out += `<text x="${cx}" y="${cy + 4}" text-anchor="middle" font-size="13" font-weight="600" fill="#444">${shares.reduce((t, s) => t + s.hours, 0)} h</text>`;
+    out += `<text x="${cx}" y="${cy + 4}" text-anchor="middle" font-size="13" font-weight="600" fill="#444">${Math.round(shares.reduce((t, s) => t + s.hours, 0) * 10) / 10} h</text>`;
     out += '</svg>';
     return out;
   }
@@ -289,6 +289,176 @@
     return [...years.values()].sort((x, y) => y.year - x.year);
   }
 
+  function streaks(activities, { days = 90, filter = 'all' } = {}) {
+    const end = new Date();
+    end.setHours(0, 0, 0, 0);
+    const start = new Date(end);
+    start.setDate(end.getDate() - (days - 1));
+    const active = new Set();
+    for (const { a, d } of prepared(activities, filter)) {
+      if (!d) continue;
+      const t = d.getTime();
+      if (t < start.getTime() || t > end.getTime() + 86399999) continue;
+      active.add(dayKey(d));
+    }
+    const seq = [];
+    for (let i = 0; i < days; i++) {
+      const dd = new Date(start);
+      dd.setDate(start.getDate() + i);
+      seq.push(active.has(dayKey(dd)));
+    }
+    let current = 0;
+    for (let i = seq.length - 1; i >= 0 && seq[i]; i--) current++;
+    let longest = 0;
+    let run = 0;
+    let longestGap = 0;
+    let runGap = 0;
+    for (const b of seq) {
+      run = b ? run + 1 : 0;
+      runGap = b ? 0 : runGap + 1;
+      longest = Math.max(longest, run);
+      longestGap = Math.max(longestGap, runGap);
+    }
+    return {
+      current,
+      longest,
+      longestGap,
+      activeDays: active.size,
+      days,
+      consistencyPct: Math.round((active.size / days) * 100)
+    };
+  }
+
+  function qualityFlags(activities, { filter = 'all', n = 30 } = {}) {
+    const issues = [];
+    for (const { a, d } of prepared(activities, filter)) {
+      if (!d) continue;
+      const flags = [];
+      const detail = [];
+      const dist = a.distanceM || 0;
+      const timeS = a.movingTimeS || 0;
+      if (dist > 1000 && timeS > 0) {
+        const kph = dist / timeS * 3.6;
+        if (kph > 60) {
+          flags.push('speed-high');
+          detail.push(`avg ${Math.round(kph)} km/h`);
+        } else if (kph < 2.5 && dist > 5000) {
+          flags.push('speed-low');
+          detail.push(`avg ${Math.round(kph * 10) / 10} km/h`);
+        }
+      }
+      if (a.hasHr && a.averageHr && (a.averageHr > 200 || a.averageHr < 30)) {
+        flags.push('hr-weird');
+        detail.push(`HR ${a.averageHr}`);
+      }
+      if (dist > 0 && !a.hasGps && !a.polyline) {
+        flags.push('no-gps');
+        detail.push('no GPS');
+      }
+      if (dist > 1500 && a.polyline && DS.polylines?.decode) {
+        try {
+          const pts = DS.polylines.decode(a.polyline);
+          const pathLen = pts.reduce((t, p, i) => (i === 0 ? t : t + DS.polylines.haversine(pts[i - 1], p)), 0);
+          const ratio = pathLen / dist;
+          if (pts.length < 10 || ratio < 0.55) {
+            flags.push('truncated');
+            detail.push(`GPS path ${Math.round(ratio * 100)}% of recorded distance`);
+          }
+        } catch (e) {
+          /* unreadable polyline — ignore */
+        }
+      }
+      if (flags.length) issues.push({ a, d, flags, detail });
+      if (issues.length >= n) break;
+    }
+    return [...issues].sort((x, y) => y.flags.length - x.flags.length);
+  }
+
+  function heatmap(activities, { days = 120, filter = 'all' } = {}) {
+    const MATRIX = Array.from({ length: 7 }, () => Array(24).fill(0));
+    const cutoff = days ? Date.now() - days * 86400000 : 0;
+    for (const { a, d } of prepared(activities, filter)) {
+      if (!d || (cutoff && d.getTime() < cutoff)) continue;
+      const day = (d.getDay() + 6) % 7; // Monday-based
+      const hour = d.getHours();
+      MATRIX[day][hour] += (a.movingTimeS || 0) / 3600;
+    }
+    let max = 0;
+    for (const row of MATRIX) for (const v of row) max = Math.max(max, v);
+    return { matrix: MATRIX, max, total: MATRIX.flat().reduce((t, v) => t + v, 0) };
+  }
+
+  function monthlyTrends(activities, { filter = 'all', months = 8 } = {}) {
+    const map = new Map();
+    const now = new Date();
+    for (const { a, d } of prepared(activities, filter)) {
+      if (!d) continue;
+      const bucket = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const t = map.get(bucket) || { key: bucket, d: new Date(d.getFullYear(), d.getMonth(), 1), rides: 0, hours: 0, hr: null, watts: null };
+      t.rides += 1;
+      t.hours += (a.movingTimeS || 0) / 3600;
+      const hr = a.averageHr || a.hasHrAvg;
+      const w = a.averageWatts;
+      if (hr) t.hr = t.hr == null ? hr : Math.max(t.hr, hr);
+      if (w) t.watts = t.watts == null ? w : Math.max(t.watts, w);
+      map.set(bucket, t);
+    }
+    const out = [...map.values()].sort((x, y) => y.key.localeCompare(x.key)).slice(0, months).reverse();
+    const anyHr = out.some((m) => m.hr != null);
+    const anyW = out.some((m) => m.watts != null);
+    return { months: out, anyHr, anyW };
+  }
+
+  function racePredictor(activities, { distanceKm = 40, filter = 'all' } = {}) {
+    // Use the best recent average speed over the haul, with a fatigue taper
+    // exponent and a CTL/TSB correction like classic race predictors.
+    const recents = prepared(activities, filter).filter(({ a, d }) => d && a.movingTimeS && a.distanceM > 3000);
+    if (!recents.length) return null;
+    const cutoff = Date.now() - 90 * 86400000;
+    const haul = recents.filter(({ d }) => d.getTime() >= cutoff);
+    const pool = haul.length ? haul : recents;
+    let bestKph = 0;
+    let best = null;
+    for (const { a } of pool) {
+      const kph = a.distanceM / a.movingTimeS * 3.6;
+      if (kph > bestKph) {
+        bestKph = kph;
+        best = a;
+      }
+    }
+    if (!best) return null;
+    const flatKph = best.distanceM / best.movingTimeS * 3.6;
+    const refKm = best.distanceM / 1000;
+    const expo = -0.07; // pace decays slowly with distance
+    const predKph = flatKph * Math.pow(Math.min(1, refKm / distanceKm), -expo);
+    const ctl = (DS.fitness?.snapshot(activities)?.ctl) ?? 30;
+    const form = (DS.fitness?.snapshot(activities)?.tsb) ?? 0;
+    const adjust = Math.min(1.08, Math.max(0.9, 1 + (ctl - 30) / 300 + form / 200));
+    return {
+      distanceKm,
+      predictedHms: (distanceKm / (predKph * adjust)) * 3600,
+      bestKph: Math.round(bestKph * 10) / 10,
+      refKm: Math.round(refKm),
+      ctl,
+      form
+    };
+  }
+
+  function shareStats(activities, { filter = 'all' } = {}) {
+    const years = yearSummaries(activities, { filter });
+    const thisYear = years.find((y) => y.year === new Date().getFullYear());
+    const s = summary(activities, filter);
+    return {
+      count: thisYear?.count ?? 0,
+      distKm: Math.round(thisYear?.distKm ?? 0),
+      timeH: Math.round(thisYear?.timeH ?? 0),
+      elevM: Math.round(thisYear?.elevM ?? 0),
+      bestStreak: streaks(activities, { days: 365, filter }).longest,
+      totalCount: s.count,
+      totalDistKm: Math.round(s.distanceKm)
+    };
+  }
+
   DS.viz = {
     sportGroup,
     weeklySeries,
@@ -300,6 +470,12 @@
     dayKey,
     gearSummary,
     yearSummaries,
+    streaks,
+    qualityFlags,
+    heatmap,
+    monthlyTrends,
+    racePredictor,
+    shareStats,
     weeklyBarsSvg,
     calendarSvg,
     donutSvg,

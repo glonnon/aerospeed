@@ -22,6 +22,9 @@
     polylineThreshold: 0.75,
     deepGpsCheck: false,
     deletionMode: 'links',
+    gearService: {},
+    goalDistanceKm: 0,
+    goalElevM: 0,
     deviceRanking: [
       'garmin',
       'wahoo',
@@ -44,7 +47,9 @@
     distanceTolerancePct: [1, 50],
     durationTolerancePct: [1, 50],
     minOverlapPct: [10, 100],
-    polylineThreshold: [0.3, 1]
+    polylineThreshold: [0.3, 1],
+    goalDistanceKm: [0, 50000],
+    goalElevM: [0, 500000]
   };
 
   const SCOPES = ['100', '90', '180', '365', 'all'];
@@ -78,6 +83,17 @@
         .filter((x) => x && !seen.has(x) && seen.add(x))
         .slice(0, 32);
       if (list.length) s.deviceRanking = list;
+    }
+    if (raw.gearService && typeof raw.gearService === 'object') {
+      const out = {};
+      for (const [k, v] of Object.entries(raw.gearService)) {
+        const everyKm = Number(v?.everyKm);
+        const lastKm = Number(v?.lastKm);
+        if (Number.isFinite(everyKm) && everyKm > 0) {
+          out[k] = { everyKm, lastKm: Number.isFinite(lastKm) && lastKm >= 0 ? lastKm : 0 };
+        }
+      }
+      s.gearService = out;
     }
     return s;
   }
