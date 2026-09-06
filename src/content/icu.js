@@ -90,10 +90,22 @@
         }
       }
       const typeTxt = txt + ' ' + hintBits.join(' ');
-      const dMatch = txt.match(/(\d{4})-(\d{2})-(\d{2})/);
+      // Date: prefer `<time datetime>`; else a `YYYY-MM-DD` cell that may be
+      // followed by the start clock time (`2026-09-05 07:30`).
+      let startDateLocal = null;
       const timeEl = row?.querySelector('time[datetime]');
-      let startDateLocal = timeEl ? timeEl.getAttribute('datetime') : null;
-      if (!startDateLocal && dMatch) startDateLocal = `${dMatch[1]}-${dMatch[2]}-${dMatch[3]}T12:00:00`;
+      if (timeEl) {
+        startDateLocal = timeEl.getAttribute('datetime');
+      } else {
+        const dm = txt.match(/(\d{4})-(\d{2})-(\d{2})(?:[T ]+(\d{1,2}):(\d{2}))?/);
+        if (dm) {
+          const hh = dm[4] ? Number(dm[4]) : 12;
+          const mm = dm[5] ? Number(dm[5]) : 0;
+          if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+            startDateLocal = `${dm[1]}-${dm[2]}-${dm[3]}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`;
+          }
+        }
+      }
 
       const distMatch = txt.match(/([\d][\d.,]*)\s*(km|mi)\b/i);
       let distanceM = null;
@@ -102,16 +114,24 @@
         if (Number.isFinite(n)) distanceM = /mi|mile/i.test(distMatch[2]) ? n * 1609.344 : n * 1000;
       }
 
-      // Duration h:mm:ss — prefer the colon-time with two separators (hours
-      // present), which in the list is the moving time, not the start time.
+      // Duration — prefer h:mm:ss (the moving time) over h:mm (start clock).
       let movingTimeS = null;
       const hmmss = txt.match(/(?:^|\s)(\d{1,3}):(\d{2}):(\d{2})(?:\s|$)/);
-      const hmm = txt.match(/(?:^|\s)(\d{1,3}):(\d{2})(?:\s|$)/);
-      const part = hmmss ? [hmmss[1], hmmss[2], hmmss[3]] : hmm ? [hmm[1], hmm[2], 0] : null;
-      if (part) {
-        const hrs = Number(part[0]);
-        const mins = Number(part[1]);
-        if (hrs < 24 && mins < 60 && (hrs > 0 || hmmss)) movingTimeS = hrs * 3600 + mins * 60 + Number(part[2] || 0);
+      if (hmmss) {
+        const hrs = Number(hmmss[1]);
+        const mins = Number(hmmss[2]);
+        const secs = Number(hmmss[3]);
+        if (hrs <= 23 && mins < 60 && secs < 60) movingTimeS = hrs * 3600 + mins * 60 + secs;
+      }
+      if (movingTimeS == null) {
+        const hmm = txt.match(/(?:^|\s)(\d{1,2}):(\d{2})(?:\s|$)/);
+        if (hmm) {
+          const hrs = Number(hmm[1]);
+          const mins = Number(hmm[2]);
+          // h:mm ambiguous with clock time — only treat as a duration when the
+          // row also shows a distance and a date (a ride longer than 0:xx).
+          if (hrs >= 1 && hrs <= 23 && mins < 60 && distanceM != null && distanceM > 2000) movingTimeS = hrs * 3600 + mins * 60;
+        }
       }
 
       out.push({

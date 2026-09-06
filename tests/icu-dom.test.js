@@ -132,6 +132,36 @@ describe('icu.scrapeDom via scanAll (jsdom)', () => {
     expect(a.type).toBe('Ride');
   });
 
+  it('parses a date cell with a clock time and does not confuse it with duration', async () => {
+    document.body.innerHTML = `
+      <div class="activity">
+        <div class="name-cell"><a class="activity-link clickable" href="/activities/i301">Club Run</a></div>
+        <span class="date">2026-09-03 07:30</span>
+        <span>21.0 km</span>
+        <span>1:04:10</span>
+      </div>
+      <div class="activity">
+        <div class="name-cell"><a class="activity-link clickable" href="/activities/i302">Club Run</a></div>
+        <span class="date">2026-09-03 07:32</span>
+        <span>21.0 km</span>
+        <span>1:04:10</span>
+      </div>`;
+    const out = await DS.icu.scanAll({
+      fetchImpl: async () => ({ ok: false, status: 403 }),
+      pathname: '/athletes',
+      searchDateStart: '2026-09-01',
+      searchDateEnd: '2026-09-06',
+      delayMs: 0,
+      retryDelayMs: 0,
+      maxAttempts: 1
+    });
+    const a = out.activities.find((x) => x.id === 'i301');
+    const b = out.activities.find((x) => x.id === 'i302');
+    expect(a.startDateLocal).toContain('07:30');
+    expect(b.startDateLocal).toContain('07:32');
+    expect(a.movingTimeS).toBe(3850); // 1:04:10, not the clock time
+  });
+
   it('retries until the WebSocket paints rows, then seeds from the DOM', async () => {
     document.body.innerHTML = `<div class="empty">loading…</div>`;
     const fetchImpl = async (url) => ({ ok: false, status: 403, json: async () => ({}) });
