@@ -46,7 +46,7 @@ describe('icu.scrapeDom via scanAll (jsdom)', () => {
     let fetches = 0;
     const fetchImpl = async (url) => {
       fetches += 1;
-      if (url === '/api/athlete') return { ok: true, status: 200, json: async () => ({ id: 'i31188' }) };
+      if (url.startsWith('/api/athlete?')) return { ok: true, status: 200, json: async () => ({ id: 'i31188' }) };
       return {
         ok: true,
         status: 200,
@@ -58,11 +58,36 @@ describe('icu.scrapeDom via scanAll (jsdom)', () => {
       pathname: '/athletes',
       searchDateStart: '2026-09-01',
       searchDateEnd: '2026-09-06',
-      delayMs: 0
+      delayMs: 0,
+      retryDelayMs: 0,
+      maxAttempts: 1
     });
     expect(fetches).toBeGreaterThan(1);
     expect(out.strategy).toBe('icu-api');
     expect(out.activities).toHaveLength(1);
     expect(out.activities[0].id).toBe('i900');
+  });
+
+  it('retries until the WebSocket paints rows, then seeds from the DOM', async () => {
+    document.body.innerHTML = `<div class="empty">loading…</div>`;
+    const fetchImpl = async (url) => ({ ok: false, status: 403, json: async () => ({}) });
+    const out = await DS.icu.scanAll({
+      fetchImpl,
+      pathname: '/athletes',
+      searchDateStart: '2026-09-01',
+      searchDateEnd: '2026-09-06',
+      delayMs: 0,
+      retryDelayMs: 0,
+      maxAttempts: 3,
+      onAttempt: (n) => {
+        if (n === 2) {
+          document.body.innerHTML = `<div class="activity"><a class="activity-link" href="/activities/i555">Arrived Ride</a><time datetime="2026-09-04T08:00:00"></time></div>`;
+        }
+      }
+    });
+    // First attempt: DOM empty + REST 403 -> retry. Second: DOM now has rows -> seed.
+    expect(out.activities).toHaveLength(1);
+    expect(out.activities[0].id).toBe('i555');
+    expect(out.strategy).toBe('icu-dom');
   });
 });

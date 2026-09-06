@@ -101,7 +101,7 @@ describe('icu.scanAll', () => {
   it('throws a clear error when the feed is unavailable', async () => {
     const fetchImpl = async () => res({}, false, 403);
     await expect(
-      DS.icu.scanAll({ fetchImpl, pathname: '/athlete/i1/activities', searchDateStart: '2026-08-01', delayMs: 0 })
+      DS.icu.scanAll({ fetchImpl, pathname: '/athlete/i1/activities', searchDateStart: '2026-08-01', delayMs: 0, retryDelayMs: 0, maxAttempts: 1 })
     ).rejects.toThrow(/403/);
   });
 
@@ -136,7 +136,9 @@ describe('icu.scanAll', () => {
       pathname: '/athlete/i1/activities',
       searchDateStart: '2026-01-01',
       searchDateEnd: '2026-09-05',
-      delayMs: 0
+      delayMs: 0,
+      retryDelayMs: 0,
+      maxAttempts: 1
     });
     expect(calls.length).toBeGreaterThanOrEqual(3);
     expect(calls[calls.length - 1]).toContain('oldest=2026-01-01');
@@ -158,16 +160,18 @@ describe('icu.scanAll', () => {
     const calls = [];
     const fetchImpl = async (url) => {
       calls.push(url);
-      if (url === '/api/athlete') return res({ id: 'i777' });
+      if (url.startsWith('/api/athlete?')) return res({ id: 'i777' });
       return res([]);
     };
     const out = await DS.icu.scanAll({
       fetchImpl,
       pathname: '/activities',
       searchDateStart: '2026-09-01',
-      delayMs: 0
+      delayMs: 0,
+      retryDelayMs: 0,
+      maxAttempts: 1
     });
-    expect(calls[0]).toBe('/api/athlete');
+    expect(calls[0]).toContain('/api/athlete?');
     expect(calls[1]).toContain('/api/athlete/i777/activities?');
     expect(out.strategy).toBe('icu-api');
   });

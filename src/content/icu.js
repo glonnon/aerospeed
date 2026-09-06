@@ -113,12 +113,27 @@
   }
 
   async function resolveAthleteId(opts = {}) {
+    const fetchImpl = opts.fetchImpl || defaultFetch;
     const fromUrl = athleteIdFromUrl(opts.pathname ?? (typeof location !== 'undefined' ? location.pathname : ''));
     if (fromUrl) return fromUrl;
-    const me = await apiGet(opts.fetchImpl || defaultFetch, '/api/athlete');
-    const meData = me.ok ? await me.json().catch(() => null) : null;
-    if (meData && meData.id != null) return String(meData.id);
-    throw new Error('Could not determine the intervals.icu athlete id — open the Activities tab of an athlete page.');
+
+    // The app bootstraps the logged-in athlete with GET /api/athlete (same
+    // session cookies). Tolerate common shapes: a bare athlete, {athlete: …},
+    // {data: …} or a one-element array.
+    const res = await apiGet(fetchImpl, '/api/athlete?deviceClass=DESKTOP');
+    if (!res.ok) throw new Error(`Intervals.icu /api/athlete returned HTTP ${res.status} — session cookie missing?`);
+    let d = null;
+    try {
+      d = await res.json();
+    } catch (e) {
+      const text = await res.text().catch(() => '');
+      const m = String(text).match(/"(?:id)"\s*:\s*"([^"]+)"/);
+      if (m) return String(m[1]);
+      throw new Error('Intervals.icu /api/athlete did not return JSON');
+    }
+    const id = d?.id ?? d?.athlete?.id ?? d?.data?.id ?? (Array.isArray(d) ? d[0]?.id : null);
+    if (id == null) throw new Error('Intervals.icu /api/athlete response had no id');
+    return String(id);
   }
 
   function normalize(a) {
@@ -157,10 +172,72 @@
   const CHUNK_MS = 92 * 86400000;
   const INCREMENTAL_MS = 92 * 86400000;
 
+  // One pass: merge whatever the page has already rendered (DOM, from the WS)
+  // with fresh REST chunks. Never throws if the DOM produced rows.
+  async function attemptScan(opts, fetchImpl, settings, delayMs, seen, oldestMs, newestMs) {
+    const activities = [];
+    let chunks = 0;
+    let stopped = false;
+    let error = null;
+
+    const domSeeded = (typeof document !== 'undefined' ? scrapeDom() : []).filter((a) => a && a.id && !seen.has(a.id));
+    for (const a of domSeeded) {
+      seen.add(a.id);
+      activities.push(a);
+    }
+
+    if (!domSeeded.length && opts.signal?.aborted) stopped = true;
+
+    if (!domSeeded.length && !stopped) {
+      let athleteId = null;
+      let end = newestMs;
+      const maxChunks = Math.max(1, opts.maxPages || 40);
+      while (end > oldestMs && chunks < maxChunks) {
+        if (opts.signal?.aborted) {
+          stopped = true;
+          break;
+        }
+        const start = Math.max(oldestMs, end - CHUNK_MS);
+        let rows = [];
+        let res = null;
+        try {
+          if (athleteId == null) athleteId = await resolveAthleteId(opts);
+          const path = `/api/athlete/${encodeURIComponent(athleteId)}/activities?oldest=${isoDay(start)}&newest=${isoDay(end)}&limit=200&token=${triggerToken()}`;
+          res = await apiGet(fetchImpl, path);
+          if (!res.ok) throw new Error(`HTTP ${res.status} from ${path}`);
+          const data = await res.json().catch(() => null);
+          rows = extractRows(data).map(normalize).filter(Boolean);
+        } catch (e) {
+          error = e;
+          if (res && res.status >= 500) break;
+          break;
+        }
+        chunks += 1;
+        let added = 0;
+        for (const a of rows) {
+          if (!a || seen.has(a.id)) continue;
+          seen.add(a.id);
+          activities.push(a);
+          added += 1;
+        }
+        opts.onProgress?.({ page: chunks, loaded: activities.length, strategy: 'icu-api' });
+        if (opts.knownIds && added === 0) break;
+        if (opts.stopAfter && activities.length >= opts.stopAfter) break;
+        if (start <= oldestMs) break;
+        end = start - 86400000;
+        if (delayMs && end > oldestMs) await sleep(delayMs);
+      }
+    }
+
+    return { activities, chunks, stopped, error, domSeeded: domSeeded.length > 0 };
+  }
+
   async function scanAll(opts = {}) {
     const fetchImpl = opts.fetchImpl || defaultFetch;
     const settings = opts.settings || DS.settingsStore?.get() || {};
     const delayMs = opts.delayMs ?? 150;
+    const retryDelayMs = opts.retryDelayMs ?? 1800;
+    const maxAttempts = Math.max(1, opts.maxAttempts ?? 4);
 
     let oldestMs;
     if (opts.searchDateStart) oldestMs = Date.parse(opts.searchDateStart);
@@ -169,75 +246,29 @@
     else oldestMs = Date.parse('1980-01-01');
     const newestMs = opts.searchDateEnd ? Date.parse(opts.searchDateEnd) + 86399999 : Date.now();
 
-    const maxChunks = Math.max(1, opts.maxPages || 40);
     const seen = new Set();
     if (opts.knownIds) for (const id of opts.knownIds) seen.add(String(id));
-    const activities = [];
-    let chunks = 0;
-    let stopped = false;
-    let lastError = null;
 
-    let end = newestMs;
-    // Intervals.icu renders the visible list from a WebSocket, so the DOM is the
-    // most reliable source. Use it directly when the page already shows rows.
-    let domSeeded = [];
-    if (typeof document !== 'undefined') {
-      domSeeded = scrapeDom();
-      for (const a of domSeeded) {
-        if (!a?.id || seen.has(a.id)) continue;
-        seen.add(a.id);
-        activities.push(a);
-      }
-    }
-    if (!domSeeded.length) {
-    let athleteId = null;
-    while (end > oldestMs && chunks < maxChunks) {
-      if (opts.signal?.aborted) {
-        stopped = true;
-        break;
-      }
-      const start = Math.max(oldestMs, end - CHUNK_MS);
-      const token = triggerToken();
-      if (athleteId == null) athleteId = await resolveAthleteId(opts);
-      const path = `/api/athlete/${encodeURIComponent(athleteId)}/activities?oldest=${isoDay(start)}&newest=${isoDay(end)}&limit=200&token=${token}`;
-      let rows = [];
-      let res = null;
-      try {
-        res = await apiGet(fetchImpl, path);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json().catch(() => null);
-        rows = extractRows(data).map(normalize).filter(Boolean);
-      } catch (e) {
-        lastError = e;
-        if (res && res.status >= 500) break;
-        throw new Error(`Intervals.icu fetch failed (${res?.status ?? 'network'}): ${e.message}`);
-      }
-      chunks += 1;
-      let added = 0;
-      for (const a of rows) {
-        if (!a || seen.has(a.id)) continue;
-        seen.add(a.id);
-        activities.push(a);
-        added += 1;
-      }
-      opts.onProgress?.({ page: chunks, loaded: activities.length, strategy: 'icu-api' });
-      if (opts.knownIds && added === 0) break;
-      if (opts.stopAfter && activities.length >= opts.stopAfter) break;
-      if (start <= oldestMs) break;
-      end = start - 86400000;
-      if (delayMs && end > oldestMs) await sleep(delayMs);
-    }
+    let best = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      opts.onAttempt?.(attempt);
+      const r = await attemptScan(opts, fetchImpl, settings, delayMs, seen, oldestMs, newestMs);
+      best = r;
+      if (r.activities.length || r.stopped || attempt === maxAttempts) break;
+      if (attempt < maxAttempts && !opts.signal?.aborted) await sleep(retryDelayMs); // let the WS paint rows
     }
 
-    const domOnly = domSeeded.length > 0 && chunks === 0;
-    const chunkDone = end > oldestMs;
+    if (!best.activities.length && best.error) {
+      throw best.error;
+    }
 
+    const domOnly = best.activities.length > 0 && best.chunks === 0;
     return {
-      activities,
-      pages: chunks || domOnly ? 1 : 0,
-      strategy: domOnly ? 'icu-dom' : 'icu-api',
-      truncated: chunkDone && !stopped && !domOnly,
-      stopped,
+      activities: best.activities,
+      pages: best.chunks || domOnly ? 1 : 0,
+      strategy: domOnly ? 'icu-dom' : best.chunks ? 'icu-api' : 'icu-dom',
+      truncated: false,
+      stopped: best.stopped,
       hasWebToken: false
     };
   }
