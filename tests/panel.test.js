@@ -145,6 +145,35 @@ describe('panel', () => {
     expect(drawer.open).toBe(false);
   });
 
+  it('enriches a cached sparse row when a fuller copy arrives', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    DS.panel.mount(host);
+    const st = DS.panel.state;
+    st.activities = [
+      { id: 'i1', name: 'R', type: 'Ride', startDateLocal: '2026-09-05T10:00:00', distanceM: null, movingTimeS: null, source: 'icu-dom' }
+    ];
+    DS.panel.mergeActivities([
+      { id: 'i1', name: 'R', type: 'Ride', startDateLocal: '2026-09-05T10:00:00', distanceM: 40000, movingTimeS: 5400, source: 'icu' }
+    ]);
+    expect(st.activities).toHaveLength(1);
+    expect(st.activities[0].distanceM).toBe(40000);
+    expect(st.activities[0].movingTimeS).toBe(5400);
+  });
+
+  it('appends new ids without duplicating existing ones', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    DS.panel.mount(host);
+    const st = DS.panel.state;
+    st.activities = [{ id: 'i1', name: 'a', type: 'Ride', startDateLocal: '2026-09-05T10:00:00' }];
+    DS.panel.mergeActivities([
+      { id: 'i1', name: 'a', type: 'Ride', startDateLocal: '2026-09-05T10:00:00', distanceM: 40000 },
+      { id: 'i2', name: 'b', type: 'Run', startDateLocal: '2026-09-04T10:00:00', distanceM: 5000 }
+    ]);
+    expect(st.activities.map((a) => a.id)).toEqual(['i1', 'i2']);
+  });
+
   it('finds the training tab strip at the li level', () => {
     document.body.innerHTML = `
       <main>

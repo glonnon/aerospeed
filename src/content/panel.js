@@ -320,7 +320,14 @@
   function mergeActivities(incoming) {
     const seen = new Set(state.activities.map((a) => a.id));
     for (const a of incoming || []) {
-      if (!a?.id || seen.has(a.id)) continue;
+      if (!a?.id) continue;
+      if (seen.has(a.id)) {
+        // Replace the stale cached row (e.g. a sparse DOM row) with the fuller
+        // REST one when the new copy carries metrics the old one lacks.
+        const i = state.activities.findIndex((x) => x.id === a.id);
+        if (i >= 0 && a.distanceM != null && state.activities[i].distanceM == null) state.activities[i] = a;
+        continue;
+      }
       seen.add(a.id);
       state.activities.push(a);
     }
@@ -2165,9 +2172,11 @@
         const knownIds = new Set(state.activities.map((a) => a.id));
         const res = await api().scanAll({ settings, knownIds, maxPages: 10, delayMs: 200 });
         console.info(`[dedupe] cache: ${state.activities.length} cached, ${res.activities.length} new`);
-        if (res.activities.length) {
-          const newIds = new Set(res.activities.map((a) => a.id));
-          mergeActivities(res.activities);
+        const newIds = new Set(res.activities.map((a) => a.id));
+        // Always merge: REST rows carry metrics (distance/time) that sparse DOM
+        // rows in the cache lack, so even 0 *new* ids can enrich known ones.
+        const merged = mergeActivities(res.activities);
+        if (merged.length) {
           await persistCache();
           afterDataChanged();
           await enrichState();
@@ -2355,5 +2364,5 @@
     }
   }
 
-  DS.panel = { mount, state, integrate, _findTabStrip: findTabStrip };
+  DS.panel = { mount, state, integrate, mergeActivities, _findTabStrip: findTabStrip };
 })();

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AeroSpeed",
-  "version": "0.25.3",
+  "version": "0.25.4",
   "description": "Find and clean up duplicate Strava activities, track training with a local fitness dashboard, and get AI coaching toward your goals. Everything runs locally in your browser.",
   "permissions": ["storage"],
   "background": {

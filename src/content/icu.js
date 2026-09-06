@@ -179,16 +179,17 @@
     let chunks = 0;
     let stopped = false;
     let error = null;
+    let byId = new Map();
 
     const domSeeded = (typeof document !== 'undefined' ? scrapeDom() : []).filter((a) => a && a.id && !seen.has(a.id));
     for (const a of domSeeded) {
       seen.add(a.id);
-      activities.push(a);
+      byId.set(a.id, a);
     }
 
-    if (!domSeeded.length && opts.signal?.aborted) stopped = true;
+    if (opts.signal?.aborted) stopped = true;
 
-    if (!domSeeded.length && !stopped) {
+    if (!opts.signal?.aborted) {
       let athleteId = null;
       let end = newestMs;
       const maxChunks = Math.max(1, opts.maxPages || 40);
@@ -215,19 +216,22 @@
         chunks += 1;
         let added = 0;
         for (const a of rows) {
-          if (!a || seen.has(a.id)) continue;
+          if (!a) continue;
+          if (seen.has(a.id)) continue;
           seen.add(a.id);
-          activities.push(a);
+          byId.set(a.id, a);
           added += 1;
         }
-        opts.onProgress?.({ page: chunks, loaded: activities.length, strategy: 'icu-api' });
+        opts.onProgress?.({ page: chunks, loaded: byId.size, strategy: 'icu-api' });
         if (opts.knownIds && added === 0) break;
-        if (opts.stopAfter && activities.length >= opts.stopAfter) break;
+        if (opts.stopAfter && byId.size >= opts.stopAfter) break;
         if (start <= oldestMs) break;
         end = start - 86400000;
         if (delayMs && end > oldestMs) await sleep(delayMs);
       }
     }
+
+    for (const a of byId.values()) activities.push(a);
 
     return { activities, chunks, stopped, error, domSeeded: domSeeded.length > 0 };
   }
